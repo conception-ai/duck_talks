@@ -13,9 +13,9 @@ Your code must be clean, minimalist and easy to read.
 | @api/server.py | FastAPI backend — SSE streaming + sentence buffering |
 | @vibecoded_apps/CLAUDE.md | Svelte app conventions |
 | @vibecoded_apps/claude_talks/src/routes/live/+page.svelte | Gemini Live — browser client (DI wiring + thin render) |
-| @vibecoded_apps/claude_talks/src/routes/live/types.ts | Port interfaces (DataStoreMethods, AudioPort, LiveBackend, ConverseApi) + correction types (STTCorrection, PendingApproval) |
+| @vibecoded_apps/claude_talks/src/routes/live/types.ts | Port interfaces (DataStoreMethods, AudioPort, LiveBackend, ConverseApi, RealtimeInput) + correction types (STTCorrection, PendingApproval) |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/data.svelte.ts | Data store — reactive state + session lifecycle + audio buffer + approval flow |
-| @vibecoded_apps/claude_talks/src/routes/live/stores/ui.svelte.ts | UI store — persistent user prefs (voiceEnabled, apiKey, learningMode) |
+| @vibecoded_apps/claude_talks/src/routes/live/stores/ui.svelte.ts | UI store — persistent user prefs (voiceEnabled, apiKey, learningMode, pttMode) |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/corrections.svelte.ts | Corrections store — localStorage-persisted STT corrections |
 | @vibecoded_apps/claude_talks/src/routes/live/recorder.ts | Mic audio recorder — RecordedChunk type (reused for audio buffer) |
 | @vibecoded_apps/claude_talks/src/routes/live/gemini.ts | Gemini Live connection + message handling + STT correction prompt injection |
@@ -24,6 +24,7 @@ Your code must be clean, minimalist and easy to read.
 | @vibecoded_apps/claude_talks/src/routes/live/models.ts | Shared types (SessionInfo) |
 | @vibecoded_apps/claude_talks/src/routes/live/tools.ts | Gemini function declarations + handlers |
 | @vibecoded_apps/claude_talks/src/lib/llm.ts | LLM abstraction — `createLLM({ apiKey })` → callable with `.stream()` and `.json<T>()` |
+| @docs/gemini-live-docs.md | Gemini Live API reference — capabilities, VAD config, function calling, session management |
 
 ## Guiding Principles
 
@@ -32,6 +33,10 @@ Your code must be clean, minimalist and easy to read.
 ## Gotchas
 
 - **Gemini Live**: use `types.LiveConnectConfig` + `types.Modality.AUDIO` (not raw dicts). `model_turn.parts` can be `None`. File input needs chunking + `audio_stream_end=True`.
+- **Two injection channels** (`gemini.ts`): A Gemini Live session has two ways to send data — they can be used simultaneously on the same session.
+  - `sendRealtimeInput` — **live audio stream**. Subject to VAD (auto-detects speech start/stop). Produces `inputTranscription` events. Best-effort ordering. Use for: mic audio.
+  - `sendClientContent` — **structured context injection**. No VAD, no `inputTranscription`. Deterministic ordering. Model responds only if `turnComplete: true`. Use for: prefilling context, feeding Claude text back, injecting audio corrections (`inlineData`).
+  - Ordering is guaranteed *within* each channel but *not across* them. Already mixed in practice: mic streams via `sendRealtimeInput` while Claude chunks are injected via `sendClientContent`.
 - **Function calling**: `tools.ts` declares `TOOLS` (uses `Type` enum from SDK) + `handleToolCall()` (pure fetch). The `converse` tool is `NON_BLOCKING` + `SILENT` response — Gemini speaks an acknowledgment while Claude streams in the background. Chunks are fed back via `sendClientContent` so Gemini reads them aloud. The handler lives in `gemini.ts` (not `tools.ts`) because it needs the session ref.
 - **Converse phase gating** (`gemini.ts`): A `conversePhase` state machine (`idle` → `suppressing` → `relaying` → `idle`) gates both audio and text during converse. Key non-obvious timing: Gemini sends "Asking Claude" audio/text BEFORE the `toolCall` message arrives, so the ack naturally passes through while `conversePhase` is still `idle`. After the tool call, `suppressing` blocks Gemini's own audio + flushes the player. On first `sendClientContent` (Claude chunk), `relaying` re-enables audio (Gemini reads Claude aloud) but keeps blocking `outputTranscription` (the `[CLAUDE]:` echo is noise — Claude's text is already in `pendingTool.text` via `appendTool`). `holdForApproval` takes an optional `cancel` callback to reset the phase on reject.
 - **Svelte app**: Gemini API key is stored client-side in `localStorage` (`claude-talks:ui`), managed via modal in `ui.svelte.ts`. Flows through DI: `ui.apiKey` → `data.svelte.ts` (`getApiKey` dep) → `gemini.ts` (`ConnectDeps.apiKey`). Modal auto-opens on first visit if no key is set.
@@ -48,6 +53,12 @@ Your code must be clean, minimalist and easy to read.
   - `commitTurn()` merges consecutive user turns (VAD fires multiple interrupts per utterance) and clears `pendingInput`/`audioBuffer`.
   - Audio/text suppression during converse is handled by `conversePhase` in `gemini.ts` (not in the store). See **Converse phase gating** above.
   - Approval UI is embedded in the last user turn bubble (not a separate element).
+- **Push-to-talk (PTT)**: `pttMode` toggle in ui store. When on, Gemini's automatic VAD is disabled (`realtimeInputConfig.automaticActivityDetection.disabled: true`) and the user explicitly brackets speech with a hold-to-talk button. Key details:
+  - **Session-level config** — VAD vs PTT is set at `ai.live.connect()` time. Can't toggle mid-session. UI disables the toggle when `status !== 'idle'`. Must stop + restart to switch modes.
+  - **`sendRealtimeInput` widened** — `LiveBackend.sendRealtimeInput` takes a `RealtimeInput` object (`{ audio?, activityStart?, activityEnd? }`) matching the SDK shape. In `gemini.ts` it's a pure pass-through: `(input) => session.sendRealtimeInput(input)`. All audio call sites use `{ audio: { data, mimeType } }`.
+  - **Mic gating** — mic runs continuously in both modes. One guard in the callback: `if (pttMode && !pttActive) return;`. This avoids re-initializing AudioContext/worklet on each press. `pttPress()` sets the flag + sends `activityStart`; `pttRelease()` clears it + sends `activityEnd`.
+  - **`pttMode` is non-reactive in data store** — plain `let`, set once at `start()` from `deps.getPttMode()`. UI reads `ui.pttMode` directly (not from data store). `pttActive` IS reactive (`$state`) for UI button feedback.
+  - **Replay always uses VAD** — `startReplay()` passes `pttMode: false`. PTT doesn't apply to pre-recorded audio.
 
 ## Locations & commands
 
