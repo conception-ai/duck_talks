@@ -2,10 +2,10 @@
   import { createDataStore } from './stores/data.svelte';
   import { createUIStore } from './stores/ui.svelte';
   import { createCorrectionsStore } from './stores/corrections.svelte';
-  import { startMic, createPlayer } from './audio';
+  import { startMic, createPlayer, playPcmChunks } from './audio';
   import { createConverseApi } from './converse';
   import type { Recording } from './recorder';
-  import type { AudioSink } from './types';
+  import type { AudioSink, STTCorrection } from './types';
 
   const ui = createUIStore();
   const corrections = createCorrectionsStore();
@@ -31,6 +31,16 @@
 
   let keyDraft = $state(ui.apiKey ?? '');
   let correctionsModalOpen = $state(false);
+  let playingId = $state<string | null>(null);
+  let stopPlaying: (() => void) | null = null;
+
+  function playCorrection(c: STTCorrection) {
+    stopPlaying?.();
+    if (playingId === c.id) { playingId = null; return; }
+    const handle = playPcmChunks(c.audioChunks.map(ch => ch.data), 16000, () => { playingId = null; });
+    stopPlaying = handle.stop;
+    playingId = c.id;
+  }
   let editing = $state(false);
 
   let editDraft = $state('');
@@ -261,6 +271,11 @@
             <span class="correction-arrow">-&gt;</span>
             <span class="correction-meant">{c.meant}</span>
           </div>
+          {#if c.audioChunks.length}
+            <button class="correction-play" onclick={() => playCorrection(c)}>
+              {playingId === c.id ? '\u25A0' : '\u25B6'}
+            </button>
+          {/if}
           <button class="correction-delete" onclick={() => corrections.remove(c.id)}>x</button>
         </div>
       {/each}
@@ -521,6 +536,13 @@
 
   .correction-meant {
     color: #059669;
+  }
+
+  .correction-play {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+    color: #2563eb;
+    border-color: #93c5fd;
   }
 
   .correction-delete {

@@ -116,6 +116,49 @@ export function createPlayer(): PlayerHandle {
   };
 }
 
+// --- One-shot PCM playback (for recorded clips) ---
+
+export function playPcmChunks(
+  chunks: string[],
+  sampleRate: number,
+  onEnded?: () => void,
+): { stop: () => void } {
+  const allBytes = chunks.map(base64ToUint8);
+  const totalLength = allBytes.reduce((sum, b) => sum + b.length, 0);
+  const combined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const b of allBytes) {
+    combined.set(b, offset);
+    offset += b.length;
+  }
+
+  const int16 = new Int16Array(combined.buffer, combined.byteOffset, combined.byteLength / 2);
+  const float32 = new Float32Array(int16.length);
+  for (let i = 0; i < int16.length; i++) {
+    float32[i] = int16[i] / 32768;
+  }
+
+  const ctx = new AudioContext({ sampleRate });
+  const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+  buffer.getChannelData(0).set(float32);
+
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(ctx.destination);
+  src.start();
+  src.onended = () => {
+    void ctx.close();
+    onEnded?.();
+  };
+
+  return {
+    stop() {
+      try { src.stop(); } catch { /* already stopped */ }
+      void ctx.close();
+    },
+  };
+}
+
 // --- Base64 helpers ---
 
 function uint8ToBase64(bytes: Uint8Array): string {
