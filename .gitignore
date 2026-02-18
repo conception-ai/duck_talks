@@ -1,0 +1,8 @@
+__pycache__/
+.ruff_cache/
+.venv/
+*.wav
+*.pcm
+node_modules/
+dist/
+.DS_Store
