@@ -42,6 +42,19 @@
     playingId = c.id;
   }
 
+  function downloadCorrection(c: STTCorrection) {
+    const blob = new Blob(
+      [JSON.stringify({ chunks: c.audioChunks, sampleRate: 16000 })],
+      { type: 'application/json' },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `correction-${c.id.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   function playApprovalAudio() {
     const chunks = live.pendingApproval?.audioChunks;
     if (!chunks?.length) return;
@@ -290,6 +303,7 @@
             <button class="correction-play" onclick={() => playCorrection(c)}>
               {playingId === c.id ? '\u25A0' : '\u25B6'}
             </button>
+            <button class="correction-play" onclick={() => downloadCorrection(c)}>{'\u2193'}</button>
           {/if}
           <button class="correction-delete" onclick={() => corrections.remove(c.id)}>x</button>
         </div>
