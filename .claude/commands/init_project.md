@@ -71,15 +71,34 @@ Your code must be clean, minimalist and easy to read.
 
 ## Testing
 
-After making changes, verify with the E2E test:
+After making changes, verify with the E2E test using the `e2e-chrome-tester` agent.
 
-1. Start both servers in background:
-   - `source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000`
-   - `cd vibecoded_apps/claude_talks && npx vite --port 5173`
-2. Use Chrome MCP to navigate to `http://localhost:5173/#/live`
-3. Take a snapshot to confirm the page loads (buttons: Start, Record, Replay, plus saved recordings)
-4. Check console for errors (`list_console_messages`)
-5. Run the **converse** scenario: click the `converse_closure_question` button (a saved recording that triggers the full converse pipeline via replay — Gemini → tool call → SSE → sendClientContent). Verify messages appear and no console errors.
+### How to use the E2E agent
+
+The agent is a **vanilla test executor** — it does exactly what you tell it and reports results. It has no project context. Your prompt must be **self-contained**: explicit start state, explicit steps, explicit success criteria.
+
+**Rules for launching:**
+1. **Start both servers first** (Bash, background) before launching the agent.
+2. **Tell it the URL** — always `http://localhost:5173/#/live`.
+3. **Tell it what to look for** — element text, button labels, console log patterns. Be literal.
+4. **Tell it what success looks like** — "page shows buttons: Start, Record, Replay", "console has no errors", "a message bubble appears with text".
+5. **Don't assume context** — the agent doesn't know the app. Describe UI elements by visible text/role, not by component names.
+
+### Servers
+
+Start both in background before launching the agent:
+```bash
+source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000
+cd vibecoded_apps/claude_talks && npx vite --port 5173
+```
+
+### Standard E2E scenarios
+
+**Smoke test** (page loads):
+> Navigate to `http://localhost:5173/#/live`. Take a snapshot. Verify buttons with text "Start", "Record", "Replay" are visible. Check console for errors (`list_console_messages`). Report pass/fail.
+
+**Converse pipeline** (full E2E):
+> Navigate to `http://localhost:5173/#/live`. Take a snapshot. Click the button labeled `converse_closure_question` (a saved recording). Wait 15 seconds for the replay to complete. Take a snapshot. Verify that message bubbles appeared in the conversation area. Check console for errors — ignore "mic" warnings. Report pass/fail.
 
 - Saved recordings: `vibecoded_apps/claude_talks/public/recordings/` — `.json` files that can be replayed in the UI to test the full E2E pipeline without a mic
 ## Instructions
