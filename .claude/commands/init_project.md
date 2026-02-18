@@ -41,7 +41,11 @@ Your code must be clean, minimalist and easy to read.
 - **SDK setup** (one-time): `npm install @anthropic-ai/claude-code --prefix ~/.claude-sdk/cli` then `CLAUDECODE= CLAUDE_CONFIG_DIR=~/.claude-sdk ~/.claude-sdk/cli/node_modules/.bin/claude login`
 - **SDK client lifetime**: `ClaudeSDKClient` goes stale after the first `receive_response()` — the second `query()` hangs forever. Use the standalone `query()` function instead, with `resume=session_id` (captured from `ResultMessage.session_id`) to maintain conversation across calls. Each call spawns a fresh subprocess but resumes the same session.
 - **SDK cwd constraint**: Setting `cwd` to a path inside `~/.claude/` causes the SDK subprocess to hang (observed, root cause unknown). This affects any project located under the Claude config directory, not just this one. Workaround: use a temp dir or a path outside `~/.claude/`.
-- **Learning mode**: `learningMode` toggle in ui store. When on, `converse` tool calls are held for user approval (Accept/Edit/Reject) instead of executing immediately. Corrections are persisted in `corrections.svelte.ts` (localStorage `claude-talks:corrections`) and injected into Gemini's `systemInstruction` via `buildSystemPrompt()` on next session connect. Key detail: `snapshotUtterance()` must be called BEFORE `commitTurn()` in `gemini.ts` (commitTurn resets the audio buffer). `appendOutput` is suppressed during active converse tools (post-tool outputTranscription is noise).
+- **Learning mode**: `learningMode` toggle in ui store. When on, `converse` tool calls are held for user approval (Accept/Edit/Reject) instead of executing immediately. Corrections are persisted in `corrections.svelte.ts` (localStorage `claude-talks:corrections`) and injected into Gemini's `systemInstruction` via `buildSystemPrompt()` on next session connect. Key details:
+  - `snapshotUtterance()` must be called BEFORE `commitTurn()` in `gemini.ts` — it captures the full merged user text (prior committed user turns + current `pendingInput`) and audio buffer.
+  - `commitTurn()` merges consecutive user turns (VAD fires multiple interrupts per utterance) and clears `pendingInput`/`audioBuffer`.
+  - `appendOutput` is suppressed during active converse tools (post-tool outputTranscription is noise).
+  - Approval UI is embedded in the last user turn bubble (not a separate element).
 
 ## Locations & commands
 
