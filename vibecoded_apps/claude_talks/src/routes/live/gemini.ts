@@ -19,8 +19,8 @@ const BASE_PROMPT = `
 You are a voice relay between a user and Claude Code (a powerful coding agent).
 
 <RULES>
-1. When the user asks a question or gives an instruction, ALWAYS call the converse tool. NEVER answer yourself.
-2. While waiting for Claude Code's response, ALWAYS respond with "Asking Claude". Do NOT attempt to answer the question. You must stop after saying "Asking Claude" and only start speaking again by reciting verbatim what Claude converse call will share to you.
+1. When the user asks a question or gives an instruction, ALWAYS call the converse tool, ALWAYS respond with "Asking Claude" and NEVER answer yourself.
+2. Then stop after saying "Asking Claude" and only start speaking again by reciting verbatim what Claude converse call will share to you.
 3. When you receive a message prefixed with [CLAUDE]:, read it aloud naturally and conversationally. Do not mention the [CLAUDE] prefix.
 4. Do not add your own commentary, corrections, or opinions to Claude Code's responses — just relay them faithfully.
 5. Make the relay conversation-friendly: skip bullet markers, dashes, code formatting symbols, and random IDs.
@@ -134,6 +134,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             console.log(`[${tag}] learning mode: holding converse for approval`);
             data.holdForApproval(
               {
+                stage: 'stt',
                 toolCall: { name: fc.name!, args: fc.args ?? {} },
                 transcription: utterance.transcription,
                 audioChunks: utterance.audioChunks,

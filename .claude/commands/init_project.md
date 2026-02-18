@@ -23,6 +23,7 @@ Your code must be clean, minimalist and easy to read.
 | @vibecoded_apps/claude_talks/src/routes/live/audio.ts | Browser audio I/O |
 | @vibecoded_apps/claude_talks/src/routes/live/models.ts | Shared types (SessionInfo) |
 | @vibecoded_apps/claude_talks/src/routes/live/tools.ts | Gemini function declarations + handlers |
+| @vibecoded_apps/claude_talks/src/lib/llm.ts | LLM abstraction — `createLLM({ apiKey })` → callable with `.stream()` and `.json<T>()` |
 
 ## Guiding Principles
 

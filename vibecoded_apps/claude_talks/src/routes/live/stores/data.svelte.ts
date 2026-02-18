@@ -38,6 +38,7 @@ export function createDataStore(deps: DataStoreDeps) {
   let pendingOutput = $state('');
   let pendingTool = $state<PendingTool | null>(null);
   let awaitingToolDone = false; // not reactive — internal flag only
+  let converseAckDone = false; // gate: suppress output after Gemini's acknowledgment is committed
   let pendingApproval = $state<PendingApproval | null>(null);
   let pendingExecute: ((instruction: string) => void) | null = null;
 
@@ -58,13 +59,14 @@ export function createDataStore(deps: DataStoreDeps) {
   }
 
   function appendOutput(text: string) {
-    if (pendingTool?.name === 'converse') return;
+    if (pendingTool?.name === 'converse' && converseAckDone) return;
     pendingOutput += text;
   }
 
   function startTool(name: string, args: Record<string, unknown>) {
     pendingTool = { name, args, text: '', streaming: true };
     awaitingToolDone = false;
+    converseAckDone = false;
   }
 
   function appendTool(text: string) {
@@ -81,6 +83,10 @@ export function createDataStore(deps: DataStoreDeps) {
   }
 
   function commitTurn() {
+    // After first commit with active converse tool, suppress further output
+    // (Gemini's acknowledgment is already in pendingOutput; subsequent output is echo noise)
+    if (pendingTool?.name === 'converse') converseAckDone = true;
+
     // Always flush user input
     const userText = pendingInput.trim();
     if (userText) {
@@ -157,10 +163,19 @@ export function createDataStore(deps: DataStoreDeps) {
     pendingExecute = execute;
   }
 
-  function approve(editedInstruction?: string) {
-    if (!pendingApproval || !pendingExecute) return;
+  function approve(editedText?: string) {
+    if (!pendingApproval) return;
+
+    if (pendingApproval.stage === 'stt') {
+      // Stage 1 done — advance to tool-call approval
+      pendingApproval = { ...pendingApproval, stage: 'tool-call' };
+      return;
+    }
+
+    // Stage 2: execute converse
+    if (!pendingExecute) return;
     const instruction =
-      editedInstruction ?? String(pendingApproval.toolCall.args.instruction ?? '');
+      editedText ?? String(pendingApproval.toolCall.args.instruction ?? '');
     if (pendingTool) pendingTool.args = { instruction };
     pendingExecute(instruction);
     pendingApproval = null;

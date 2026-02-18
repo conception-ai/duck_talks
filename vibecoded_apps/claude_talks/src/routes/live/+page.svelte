@@ -31,28 +31,31 @@
   let keyDraft = $state(ui.apiKey ?? '');
   let correctionsModalOpen = $state(false);
   let editing = $state(false);
-  let editedTranscription = $state('');
+
+  let editDraft = $state('');
 
   function handleAccept() {
     const approval = live.pendingApproval;
     if (!approval) return;
-    live.approve(approval.transcription);
+    live.approve();
   }
 
   function handleStartEdit() {
     const approval = live.pendingApproval;
     if (!approval) return;
-    editedTranscription = approval.transcription;
+    editDraft = approval.stage === 'stt'
+      ? approval.transcription
+      : String(approval.toolCall.args.instruction ?? '');
     editing = true;
   }
 
-  function handleSubmitCorrection() {
+  function handleSubmitEdit() {
     const approval = live.pendingApproval;
     if (!approval) return;
-    if (editedTranscription !== approval.transcription) {
-      corrections.addSTT(approval.transcription, editedTranscription, approval.audioChunks);
+    if (approval.stage === 'stt' && editDraft !== approval.transcription) {
+      corrections.addSTT(approval.transcription, editDraft, approval.audioChunks);
     }
-    live.approve(editedTranscription);
+    live.approve(approval.stage === 'tool-call' ? editDraft : undefined);
     editing = false;
   }
 
@@ -130,9 +133,9 @@
 
   <div class="messages">
     {#each live.turns as turn, i}
-      {@const showApproval = turn.role === 'user' && !!live.pendingApproval
+      {@const showSTT = turn.role === 'user' && live.pendingApproval?.stage === 'stt'
         && !live.turns.slice(i + 1).some(t => t.role === 'user')}
-      <div class="msg {turn.role}" class:approval={showApproval}>
+      <div class="msg {turn.role}" class:approval={showSTT}>
         <span class="label">{turn.role === 'user' ? 'You' : 'Gemini'}</span>
         {#if turn.text}<p>{turn.text}</p>{/if}
         {#if turn.toolCall}
@@ -146,15 +149,12 @@
             {#if turn.toolResult}<p class="tool-text">{turn.toolResult}</p>{/if}
           </div>
         {/if}
-        {#if showApproval}
+        {#if showSTT}
           {#if editing}
             <p class="transcription">Original: {live.pendingApproval.transcription}</p>
-            <textarea
-              class="edit-instruction"
-              bind:value={editedTranscription}
-            ></textarea>
+            <textarea class="edit-instruction" bind:value={editDraft}></textarea>
             <div class="approval-actions">
-              <button class="approve-btn" onclick={handleSubmitCorrection}>Submit</button>
+              <button class="approve-btn" onclick={handleSubmitEdit}>Submit</button>
               <button onclick={handleCancelEdit}>Cancel</button>
             </div>
           {:else}
@@ -176,10 +176,11 @@
     {/if}
 
     {#if live.pendingTool}
-      <div class="msg assistant pending">
+      {@const showToolApproval = live.pendingApproval?.stage === 'tool-call'}
+      <div class="msg assistant" class:pending={!showToolApproval} class:approval={showToolApproval}>
         <span class="label">Gemini</span>
         {#if live.pendingOutput}<p>{live.pendingOutput}</p>{/if}
-        <div class="tool-result streaming">
+        <div class="tool-result" class:streaming={!showToolApproval}>
           <span class="tool-pill">{live.pendingTool.name}</span>
           {#if live.pendingTool.args?.instruction}
             <p class="tool-args">{live.pendingTool.args.instruction}</p>
@@ -188,6 +189,21 @@
           {/if}
           {#if live.pendingTool.text}<p class="tool-text">{live.pendingTool.text}</p>{/if}
         </div>
+        {#if showToolApproval}
+          {#if editing}
+            <textarea class="edit-instruction" bind:value={editDraft}></textarea>
+            <div class="approval-actions">
+              <button class="approve-btn" onclick={handleSubmitEdit}>Submit</button>
+              <button onclick={handleCancelEdit}>Cancel</button>
+            </div>
+          {:else}
+            <div class="approval-actions">
+              <button class="approve-btn" onclick={handleAccept}>Accept</button>
+              <button onclick={handleStartEdit}>Edit</button>
+              <button class="reject-btn" onclick={handleReject}>Reject</button>
+            </div>
+          {/if}
+        {/if}
       </div>
     {:else if live.pendingOutput}
       <div class="msg assistant pending">

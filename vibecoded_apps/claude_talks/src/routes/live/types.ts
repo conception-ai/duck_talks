@@ -44,6 +44,7 @@ export type Correction = STTCorrection;
 // --- Learning mode approval ---
 
 export interface PendingApproval {
+  stage: 'stt' | 'tool-call';
   toolCall: ToolCall;
   transcription: string;
   audioChunks: RecordedChunk[];
