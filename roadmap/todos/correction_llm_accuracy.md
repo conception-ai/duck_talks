@@ -101,41 +101,102 @@ guessing based on text alone. It can't distinguish "the STT was wrong"
 from "the user said something different." With audio, the LLM can
 listen to what the user actually said and compare it to the transcription.
 
-**Implementation — Gemini multimodal call:**
+**Two modes: zero-shot and few-shot.**
 
-`llm.ts` already supports `Part[]` with `inlineData` via the `Message`
-type. The `Input` type accepts `string | Message[]`. So `correct.ts`
-can send audio directly:
+Both send the current utterance audio. The difference is whether past
+correction examples (with their audio) are included as in-context examples.
+
+**Zero-shot** — no prior corrections exist yet, or none are relevant.
+The LLM gets only the current audio + transcription and decides if the
+STT output sounds right:
 
 ```typescript
-import { combineChunks } from '../../lib/stt';  // already exists, combines PCM chunks
-
-async function correctInstruction(
-  llm: LLM, instruction: string, audioChunks: RecordedChunk[], corrections: Correction[],
-): Promise<string> {
-  const audio = combineChunks(audioChunks);  // base64 PCM
-
-  const result = await llm([{
+// Zero-shot: just audio + transcription
+const messages: Message[] = [
+  {
     role: 'user',
     content: [
       { inlineData: { data: audio, mimeType: 'audio/pcm;rate=16000' } },
       { text: `The speech-to-text system transcribed this audio as:
 "${instruction}"
 
-Known transcription errors for this user:
-${corrections.map(c => `- "${c.heard}" was actually "${c.meant}"`).join('\n')}
-
-Listen to the audio. If the transcription has errors that match
-the known patterns, return the corrected text. If the transcription
-is accurate, return it unchanged.
+Listen to the audio carefully. If the transcription contains
+errors, return the corrected text. If it is accurate, return
+it unchanged.
 
 Return only the final text, nothing else.` },
     ],
-  }]);
+  },
+];
+```
 
+**Few-shot** — past corrections exist. Each correction has its own audio
+(`correction.audioChunks`) plus the heard/meant pair. These become
+in-context examples before the current utterance:
+
+```typescript
+// Few-shot: past corrections as audio examples, then current utterance
+const messages: Message[] = [];
+
+// System context
+messages.push({
+  role: 'user',
+  content: 'You fix speech-to-text errors. You will receive audio recordings ' +
+    'with their transcriptions. First, examples of past corrections. ' +
+    'Then, a new utterance to correct.',
+});
+messages.push({ role: 'assistant', content: 'Understood.' });
+
+// In-context examples: each correction's audio + heard → meant
+for (const c of corrections) {
+  if (!c.audioChunks.length) continue;
+  const exAudio = combineChunks(c.audioChunks);
+  messages.push({
+    role: 'user',
+    content: [
+      { inlineData: { data: exAudio, mimeType: 'audio/pcm;rate=16000' } },
+      { text: `STT transcribed this as: "${c.heard}"\nWhat was actually said?` },
+    ],
+  });
+  messages.push({ role: 'assistant', content: c.meant });
+}
+
+// Current utterance to correct
+messages.push({
+  role: 'user',
+  content: [
+    { inlineData: { data: audio, mimeType: 'audio/pcm;rate=16000' } },
+    { text: `STT transcribed this as: "${instruction}"\nWhat was actually said?` },
+  ],
+});
+```
+
+**The logic in `correctInstruction`:**
+
+```typescript
+async function correctInstruction(
+  llm: LLM, instruction: string, audioChunks: RecordedChunk[], corrections: Correction[],
+): Promise<string> {
+  const audio = combineChunks(audioChunks);
+  const withAudio = corrections.filter(c => c.audioChunks.length > 0);
+
+  let messages: Message[];
+  if (withAudio.length) {
+    messages = buildFewShot(audio, instruction, withAudio);  // examples + current
+  } else {
+    messages = buildZeroShot(audio, instruction);            // just current
+  }
+
+  const result = await llm(messages);
   return result.trim() || instruction;
 }
 ```
+
+**Why few-shot with audio matters:** the LLM hears the user's accent
+and speech patterns in the examples, learns what "complete" sounds like
+when this user says "commit", then applies that learned pattern to the
+current utterance. Text-only few-shot can't do this — it's just
+string matching. Audio few-shot is calibration via ICL.
 
 **Key change:** the function signature gains `audioChunks` parameter.
 The audio is the `pendingApproval.audioChunks` captured by
@@ -167,46 +228,95 @@ The `audioChunks` are already available in scope — captured at line 135.
 
 ### B. Test in isolation first (before integrating)
 
-Build a standalone test script that calls the multimodal correction
-function with known recordings + known corrections. No Gemini Live needed.
+Build a standalone test script. No Gemini Live needed — just the LLM
+and recorded audio files.
+
+**Test matrix — 4 scenarios:**
+
+```
+                        │ No corrections     │ With corrections
+                        │ (zero-shot)        │ (few-shot)
+────────────────────────┼────────────────────┼─────────────────────
+STT wrong               │ Can LLM hear the   │ Does audio example
+("latest complete?"     │ right word from     │ improve accuracy
+ but audio says commit) │ audio alone?        │ over zero-shot?
+────────────────────────┼────────────────────┼─────────────────────
+STT correct             │ Does LLM leave it  │ Does LLM leave it
+("What is a closure?"   │ alone?             │ alone even with
+ audio matches)         │                    │ unrelated examples?
+```
 
 ```typescript
 // test-correction.ts — run with: npx tsx test-correction.ts
 import { createLLM } from './src/lib/llm';
 import { correctInstruction } from './src/routes/live/correct';
+import fs from 'fs';
 
 const llm = createLLM({ apiKey: process.env.GEMINI_API_KEY! });
 
-// Load a recording's audio chunks
-const recording = JSON.parse(fs.readFileSync(
+// Audio of user saying "What is the latest commit?"
+const commitRecording = JSON.parse(fs.readFileSync(
   'public/recordings/what_is_latest_commit.json', 'utf-8'
 ));
+// Audio of user saying "Tell me what a closure is"
+const closureRecording = JSON.parse(fs.readFileSync(
+  'public/recordings/converse_closure_question.json', 'utf-8'
+));
 
-const corrections = [
-  { type: 'stt', heard: 'complete', meant: 'commit', audioChunks: [] },
-];
+// Past correction with audio (for few-shot)
+const corrections = [{
+  type: 'stt' as const,
+  id: 'test',
+  createdAt: '',
+  heard: 'What is the latest complete?',
+  meant: 'What is the latest commit?',
+  audioChunks: commitRecording.chunks,  // same audio — user said "commit"
+}];
 
 const cases = [
-  // STT got it wrong — correction should apply
-  { instruction: 'What is the latest complete?', expected: 'What is the latest commit?' },
-  // STT got it right — should be unchanged
-  { instruction: 'What is the latest commit?', expected: 'What is the latest commit?' },
-  // Unrelated instruction — should be unchanged
-  { instruction: 'What is a closure?', expected: 'What is a closure?' },
+  // Zero-shot: STT wrong, no examples
+  { label: 'zero-shot / STT wrong',
+    instruction: 'What is the latest complete?',
+    audio: commitRecording.chunks,
+    corrections: [],
+    expected: 'What is the latest commit?' },
+
+  // Zero-shot: STT correct, no examples
+  { label: 'zero-shot / STT correct',
+    instruction: 'Tell me what a closure is',
+    audio: closureRecording.chunks,
+    corrections: [],
+    expected: 'Tell me what a closure is' },
+
+  // Few-shot: STT wrong, with matching example
+  { label: 'few-shot / STT wrong',
+    instruction: 'What is the latest complete?',
+    audio: commitRecording.chunks,
+    corrections,
+    expected: 'What is the latest commit?' },
+
+  // Few-shot: STT correct, with unrelated example
+  { label: 'few-shot / STT correct + unrelated example',
+    instruction: 'Tell me what a closure is',
+    audio: closureRecording.chunks,
+    corrections,
+    expected: 'Tell me what a closure is' },
 ];
 
 for (const c of cases) {
-  const result = await correctInstruction(llm, c.instruction, recording.chunks, corrections);
-  const pass = result === c.expected;
-  console.log(`${pass ? 'PASS' : 'FAIL'} "${c.instruction}" → "${result}" (expected "${c.expected}")`);
+  const results = [];
+  for (let i = 0; i < 3; i++) {
+    results.push(await correctInstruction(llm, c.instruction, c.audio, c.corrections));
+  }
+  const passes = results.filter(r => r === c.expected).length;
+  console.log(`${passes}/3 ${c.label}`);
+  console.log(`  input:    "${c.instruction}"`);
+  console.log(`  expected: "${c.expected}"`);
+  console.log(`  got:      ${results.map(r => `"${r}"`).join(', ')}`);
 }
 ```
 
-Run each case 3-5 times to measure consistency (LLM output is stochastic).
-
-**Key insight:** test with audio AND without audio. The audio is what
-gives the LLM ground truth. Without audio, compare to text-only baseline
-to quantify the improvement.
+Run each case 3 times minimum to measure consistency.
 
 ### C. Constrained output (combine with A)
 
@@ -228,32 +338,7 @@ const result = await llm.json<{ corrected: string; changed: boolean }>(
 
 The `changed` field eliminates the "return unchanged" ambiguity.
 
-### D. Word-level corrections (optional refinement)
 
-Extract word/phrase diffs from sentence-level corrections automatically.
-`"What is the latest complete?" → "What is the latest commit?"` becomes
-`"complete" → "commit"`. More constrained examples = less hallucination.
-
-Could be a post-processing step in `corrections.svelte.ts:addSTT()` or
-computed on-the-fly in `correct.ts`.
-
-## Timing issue (separate but related)
-
-The LLM correction adds ~2 seconds after the tool call arrives.
-During this time the user sees a pending tool with no approval buttons.
-
-Measured via E2E (2026-02-19):
-- Tool call arrives → LLM correction dispatched: 0ms (synchronous)
-- LLM correction round-trip: ~2,087ms (Gemini Flash API)
-- During those 2s: Gemini sends outputTranscription, audio, turnComplete
-
-Options:
-1. Show a "Correcting..." spinner while the LLM call runs
-2. Show the raw instruction immediately, swap in corrected text when ready
-3. Accept the 2s delay (it's after Gemini's ~10s processing anyway)
-
-See `gemini.ts:207-226` for the async `.then()` pattern where the delay
-originates.
 
 ## Test assets
 
