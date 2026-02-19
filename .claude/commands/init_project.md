@@ -123,6 +123,29 @@ cd /Users/dhuynh95/claude_talks && source /Users/dhuynh95/.claude/venv/bin/activ
 cd /Users/dhuynh95/claude_talks/vibecoded_apps/claude_talks && npx vite --port 5173
 ```
 
+### Backend testing
+
+**Bash tool stdout is unreliable for HTTP requests to the backend.** curl and python urllib produce correct responses but the Bash tool swallows stdout. Always write to a file and cat after:
+
+```bash
+# Quick test (write to file, then read)
+python3 -c "
+import urllib.request, json
+req = urllib.request.Request(
+    'http://localhost:8000/api/converse',
+    data=json.dumps({'instruction': 'say hello'}).encode(),
+    headers={'Content-Type': 'application/json'},
+)
+with urllib.request.urlopen(req, timeout=60) as r:
+    with open('/tmp/api_test.txt', 'w') as f:
+        f.write(r.read().decode())
+" ; cat /tmp/api_test.txt
+```
+
+Or use **Chrome MCP** `evaluate_script` with `fetch()` — browser stdout works fine.
+
+**`uvicorn --reload` doesn't reload transitive imports.** If you change `claude_client.py` (or any module imported by `server.py`), you must kill and restart the server process. `--reload` only re-imports the entry module.
+
 ### Standard E2E scenarios
 
 **Smoke test** (page loads):
