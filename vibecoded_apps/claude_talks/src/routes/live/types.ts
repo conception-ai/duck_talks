@@ -69,6 +69,7 @@ export interface DataStoreMethods {
     execute: (instruction: string) => void,
     cancel?: () => void,
   ): void;
+  approve(editedText?: string): void;
 }
 
 // --- Port: Audio ---

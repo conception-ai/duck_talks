@@ -193,6 +193,7 @@ export function createDataStore(deps: DataStoreDeps) {
     setStatus,
     snapshotUtterance,
     holdForApproval,
+    approve,
   };
 
   // --- Lifecycle: Live mode ---
