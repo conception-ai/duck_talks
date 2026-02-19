@@ -108,30 +108,44 @@ cc-relay/
 └── .gitignore
 ```
 
-## Reproduce from scratch
+## Setup
 
-### 1. Deploy the Worker (one-time)
+### 1. Deploy the Worker (one-time, already done)
+
+The Cloudflare Worker is deployed and runs permanently on Cloudflare's edge.
+You do NOT need to redo this. It stays live at
+`https://cc-relay.daniel-90c.workers.dev` with zero maintenance.
+
+Only redo this if you need to redeploy after code changes:
 
 ```bash
 cd cc-relay
 npm install -g wrangler
 wrangler login                         # OAuth in browser
-wrangler kv namespace create MAILBOX   # note the ID, update wrangler.jsonc
-wrangler secret put SECRET_TOKEN       # paste your chosen token
 wrangler deploy
 ```
 
-### 2. Start the server in a Claude Code Web sandbox
+<details>
+<summary>First-time setup (already completed)</summary>
+
+```bash
+wrangler kv namespace create MAILBOX   # note the ID, update wrangler.jsonc
+wrangler secret put SECRET_TOKEN       # paste your chosen token
+```
+
+</details>
+
+### 2. Start the server in a Claude Code Web sandbox (every session)
 
 Copy everything between the `---` lines and paste it as a single message into
 your Claude Code Web session:
 
 ---
-
+```markdown
 Create a file called `server.py` with the exact content below, then run these commands:
 
 ```bash
-pip install fastapi uvicorn httpx
+pip install fastapi uvicorn httpx unique-namer
 RELAY_TOKEN=cc-relay-0dc090e4fd95c0e422fb02c5784f06a5 nohup python server.py > /tmp/server.log 2>&1 &
 sleep 3 && curl -s http://127.0.0.1:8000/hello
 ```
@@ -149,10 +163,12 @@ import json
 import logging
 import os
 import ssl
+import time
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import httpx
+import namer
 import uvicorn
 from fastapi import FastAPI, Request
 
@@ -162,6 +178,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s
 RELAY_URL = os.environ.get("RELAY_URL", "https://cc-relay.daniel-90c.workers.dev")
 RELAY_TOKEN = os.environ["RELAY_TOKEN"]
 LOCAL_PORT = 8000
+INSTANCE_NAME = namer.generate()
+STARTED_AT = int(time.time())
 
 
 async def bridge_loop() -> None:
@@ -218,6 +236,8 @@ async def bridge_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    log.info("server %s started (pid=%d)", INSTANCE_NAME, os.getpid())
+    print(f"\n  Instance: {INSTANCE_NAME}\n")
     _ = asyncio.create_task(bridge_loop())
     yield
 
@@ -227,7 +247,11 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/hello")
 async def hello():
-    return {"message": "Hello from Claude Code sandbox!"}
+    return {
+        "instance": INSTANCE_NAME,
+        "started_at": STARTED_AT,
+        "uptime_s": int(time.time()) - STARTED_AT,
+    }
 
 
 @app.post("/echo")
@@ -239,7 +263,7 @@ async def echo(request: Request):
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=LOCAL_PORT)
 ```
-
+```
 ---
 
 The `sandbox/server.py` file in this repo has stricter type annotations for
