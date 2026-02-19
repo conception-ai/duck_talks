@@ -5,21 +5,30 @@
  * Grows as UI complexity grows.
  */
 
+import type { InteractionMode } from '../types';
+
 const STORAGE_KEY = 'claude-talks:ui';
 
 interface Persisted {
   voiceEnabled: boolean;
   apiKey: string | null;
-  learningMode: boolean;
+  mode: InteractionMode;
   pttMode: boolean;
 }
 
 function load(): Persisted {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Migrate old learningMode boolean → mode enum
+      if ('learningMode' in parsed && !('mode' in parsed)) {
+        return { ...parsed, mode: parsed.learningMode ? 'review' : 'direct' };
+      }
+      return parsed;
+    }
   } catch { /* corrupted — fall through to default */ }
-  return { voiceEnabled: true, apiKey: null, learningMode: false, pttMode: false };
+  return { voiceEnabled: true, apiKey: null, mode: 'direct', pttMode: false };
 }
 
 function save(state: Persisted) {
@@ -31,11 +40,11 @@ export function createUIStore() {
   let voiceEnabled = $state(persisted.voiceEnabled);
   let apiKey = $state<string | null>(persisted.apiKey);
   let apiKeyModalOpen = $state(!apiKey);
-  let learningMode = $state(persisted.learningMode);
+  let mode = $state<InteractionMode>(persisted.mode);
   let pttMode = $state(persisted.pttMode);
 
   function persist() {
-    save({ voiceEnabled, apiKey, learningMode, pttMode });
+    save({ voiceEnabled, apiKey, mode, pttMode });
   }
 
   function toggleVoice() {
@@ -43,8 +52,11 @@ export function createUIStore() {
     persist();
   }
 
-  function toggleLearningMode() {
-    learningMode = !learningMode;
+  const MODE_CYCLE: InteractionMode[] = ['direct', 'review', 'correct'];
+
+  function cycleMode() {
+    const i = MODE_CYCLE.indexOf(mode);
+    mode = MODE_CYCLE[(i + 1) % MODE_CYCLE.length];
     persist();
   }
 
@@ -73,10 +85,10 @@ export function createUIStore() {
     get voiceEnabled() { return voiceEnabled; },
     get apiKey() { return apiKey; },
     get apiKeyModalOpen() { return apiKeyModalOpen; },
-    get learningMode() { return learningMode; },
+    get mode() { return mode; },
     get pttMode() { return pttMode; },
     toggleVoice,
-    toggleLearningMode,
+    cycleMode,
     togglePttMode,
     setApiKey,
     openApiKeyModal,

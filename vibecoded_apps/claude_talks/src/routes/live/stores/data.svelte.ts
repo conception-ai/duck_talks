@@ -12,6 +12,7 @@ import type {
   AudioSink,
   AudioSource,
   ConverseApi,
+  InteractionMode,
   LiveBackend,
   PendingApproval,
   PendingTool,
@@ -23,7 +24,8 @@ interface DataStoreDeps {
   audio: AudioPort;
   api: ConverseApi;
   getApiKey: () => string | null;
-  getLearningMode: () => boolean;
+  getMode: () => InteractionMode;
+  correctInstruction: (instruction: string) => Promise<string>;
   getPttMode: () => boolean;
 }
 
@@ -212,7 +214,8 @@ export function createDataStore(deps: DataStoreDeps) {
       converseApi: api,
       tag: 'live',
       apiKey,
-      getLearningMode: deps.getLearningMode,
+      getMode: deps.getMode,
+      correctInstruction: deps.correctInstruction,
       pttMode,
     });
     if (!backend) return;
@@ -289,7 +292,8 @@ export function createDataStore(deps: DataStoreDeps) {
       converseApi: api,
       tag: 'replay',
       apiKey,
-      getLearningMode: deps.getLearningMode,
+      getMode: deps.getMode,
+      correctInstruction: deps.correctInstruction,
       pttMode: false,
     });
     if (!backend) return;

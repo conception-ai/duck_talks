@@ -41,10 +41,13 @@ export interface STTCorrection {
 
 export type Correction = STTCorrection;
 
-// --- Learning mode approval ---
+// --- Interaction mode ---
+
+export type InteractionMode = 'direct' | 'review' | 'correct';
 
 export interface PendingApproval {
-  instruction: string;
+  rawInstruction?: string;     // original Gemini arg (only set in 'correct' mode)
+  instruction: string;         // what user sees/edits (= raw in review, LLM-corrected in correct)
   audioChunks: RecordedChunk[];
 }
 

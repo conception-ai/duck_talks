@@ -61,17 +61,18 @@ import {
   type LiveServerMessage,
 } from '@google/genai';
 import { TOOLS, handleToolCall } from './tools';
-import type { AudioSink, ConverseApi, DataStoreMethods, LiveBackend } from './types';
+import type { AudioSink, ConverseApi, DataStoreMethods, InteractionMode, LiveBackend } from './types';
 
 const BASE_PROMPT = `
 You are a voice relay between a user and Claude Code (a powerful coding agent).
 
 <RULES>
-1. When the user asks a question or gives an instruction, ALWAYS call the converse tool, ALWAYS respond with "Asking Claude" and NEVER answer yourself.
+1. When the user asks a question or gives an instruction followed by "OVER", ALWAYS call the converse tool, ALWAYS respond with "Asking Claude" and NEVER answer yourself.
 2. Then stop after saying "Asking Claude" and only start speaking again by reciting verbatim what Claude converse call will share to you.
 3. When you receive a message prefixed with [CLAUDE]:, read it aloud naturally and conversationally. Do not mention the [CLAUDE] prefix.
 4. Do not add your own commentary, corrections, or opinions to Claude Code's responses — just relay them faithfully.
 5. Make the relay conversation-friendly: skip bullet markers, dashes, code formatting symbols, and random IDs.
+6 - When user says "STOP" you just stop and not answer anything.
 </RULES>
 
 You are a transparent bridge. The user is talking TO Claude Code THROUGH you. You never answer on Claude Code's behalf.
@@ -86,7 +87,8 @@ interface ConnectDeps {
   converseApi: ConverseApi;
   tag: string;
   apiKey: string;
-  getLearningMode: () => boolean;
+  getMode: () => InteractionMode;
+  correctInstruction: (instruction: string) => Promise<string>;
   pttMode: boolean;
 }
 
@@ -113,8 +115,8 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     if (message.toolCall?.functionCalls) {
       userSpokeInTurn = false; // Tool was called, don't nudge
       // Snapshot BEFORE commitTurn clears the buffer
-      const learningMode = deps.getLearningMode();
-      const audioChunks = learningMode ? data.snapshotUtterance().audioChunks : [];
+      const mode = deps.getMode();
+      const audioChunks = mode !== 'direct' ? data.snapshotUtterance().audioChunks : [];
 
       data.commitTurn();
       for (const fc of message.toolCall.functionCalls) {
@@ -184,17 +186,36 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             });
           };
 
-          if (learningMode) {
-            // Learning mode: pause for user to Accept/Edit/Reject before
-            // executing. Phase stays `suppressing` — no audio or text leaks.
-            console.log(`[${tag}] learning mode: holding converse for approval`);
+          if (mode === 'direct') {
+            executeConverse(instruction);
+          } else if (mode === 'correct') {
+            // LLM auto-corrects, then hold for approval
+            console.log(`[${tag}] correct mode: running LLM correction`);
+            deps.correctInstruction(instruction).then(
+              (corrected) => {
+                data.holdForApproval(
+                  { rawInstruction: instruction, instruction: corrected, audioChunks },
+                  executeConverse,
+                  () => { conversePhase = 'idle'; },
+                );
+              },
+              () => {
+                // Fallback: show uncorrected on LLM error
+                data.holdForApproval(
+                  { instruction, audioChunks },
+                  executeConverse,
+                  () => { conversePhase = 'idle'; },
+                );
+              },
+            );
+          } else {
+            // review mode
+            console.log(`[${tag}] review mode: holding converse for approval`);
             data.holdForApproval(
               { instruction, audioChunks },
               executeConverse,
               () => { conversePhase = 'idle'; },
             );
-          } else {
-            executeConverse(instruction);
           }
           continue;
         }
@@ -295,6 +316,11 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       },
     });
     sessionRef = session;
+    console.log(
+      `%c[${tag}] SYSTEM PROMPT%c\n${BASE_PROMPT.trim()}`,
+      'background:#7c3aed;color:white;font-weight:bold;padding:2px 6px;border-radius:3px',
+      'color:#7c3aed;white-space:pre-wrap',
+    );
 
     return {
       sendRealtimeInput: (input) => session.sendRealtimeInput(input),

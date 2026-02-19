@@ -4,6 +4,8 @@
   import { createCorrectionsStore } from './stores/corrections.svelte';
   import { startMic, createPlayer, playPcmChunks } from './audio';
   import { createConverseApi } from './converse';
+  import { correctInstruction } from './correct';
+  import { createLLM } from '../../lib/llm';
   import type { Recording } from './recorder';
   import type { AudioSink, STTCorrection } from './types';
 
@@ -24,7 +26,12 @@
     },
     api: createConverseApi(),
     getApiKey: () => ui.apiKey,
-    getLearningMode: () => ui.learningMode,
+    getMode: () => ui.mode,
+    correctInstruction: (instruction: string) => {
+      const key = ui.apiKey;
+      if (!key) return Promise.resolve(instruction);
+      return correctInstruction(createLLM({ apiKey: key }), instruction, corrections.corrections);
+    },
     getPttMode: () => ui.pttMode,
   });
 
@@ -81,8 +88,9 @@
 
   function handleSubmitEdit() {
     if (!live.pendingApproval) return;
-    if (editDraft !== live.pendingApproval.instruction) {
-      corrections.addSTT(live.pendingApproval.instruction, editDraft, live.pendingApproval.audioChunks);
+    const original = live.pendingApproval.rawInstruction ?? live.pendingApproval.instruction;
+    if (editDraft !== original) {
+      corrections.addSTT(original, editDraft, live.pendingApproval.audioChunks);
     }
     live.approve(editDraft);
     editing = false;
@@ -135,8 +143,8 @@
     <button class="header-sm" class:muted={!ui.voiceEnabled} onclick={ui.toggleVoice}>
       {ui.voiceEnabled ? 'Voice On' : 'Voice Off'}
     </button>
-    <button class="header-sm" class:active-mode={ui.learningMode} onclick={ui.toggleLearningMode}>
-      {ui.learningMode ? 'Learning' : 'Direct'}
+    <button class="header-sm" class:active-mode={ui.mode !== 'direct'} onclick={ui.cycleMode}>
+      {ui.mode === 'direct' ? 'Direct' : ui.mode === 'review' ? 'Review' : 'Correct'}
     </button>
     <button class="header-sm" class:active-mode={ui.pttMode} onclick={ui.togglePttMode}
       disabled={live.status !== 'idle'}>
@@ -206,7 +214,9 @@
         {#if live.pendingOutput}<p>{live.pendingOutput}</p>{/if}
         <div class="tool-result" class:streaming={!showApproval}>
           <span class="tool-pill">{live.pendingTool.name}</span>
-          {#if live.pendingTool.args?.instruction}
+          {#if showApproval}
+            <p class="tool-args">{live.pendingApproval.instruction}</p>
+          {:else if live.pendingTool.args?.instruction}
             <p class="tool-args">{live.pendingTool.args.instruction}</p>
           {:else if live.pendingTool.args && Object.keys(live.pendingTool.args).length}
             <p class="tool-args">{JSON.stringify(live.pendingTool.args)}</p>
