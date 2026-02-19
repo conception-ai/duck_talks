@@ -63,10 +63,16 @@ class Claude:
     _options: ClaudeAgentOptions
     _session_id: str | None
 
-    def __init__(self, model: str = "haiku", cwd: str | None = None):
+    def __init__(
+        self,
+        model: str = "haiku",
+        cwd: str | None = None,
+        system_prompt: str | None = None,
+    ):
         self._options = ClaudeAgentOptions(
             model=model,
             cwd=cwd or tempfile.mkdtemp(prefix="claude_api_"),
+            system_prompt=system_prompt or "",
             include_partial_messages=True,
             permission_mode="acceptEdits",
             cli_path=_SDK_CLI_PATH,

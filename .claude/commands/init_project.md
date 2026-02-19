@@ -80,7 +80,7 @@ Your code must be clean, minimalist and easy to read.
 - Session files: `~/.claude/projects/-{cwd-with-dashes}/{session-id}.jsonl`
 - Svelte app: `cd vibecoded_apps/claude_talks && npm run dev` (port 5000)
 - Watcher CLI: `python -m claude_talks.watcher /path/to/session.jsonl --handler log`
-- Backend: `uvicorn api.server:app --port 8000`
+- Backend: `uvicorn api.server:app --port 8000 --reload`
 - Test (mock, no credits): `curl -s -N -X POST http://localhost:8000/api/converse/test -H 'Content-Type: application/json' -d '{"instruction":"test"}'`
 - Test (real): `curl -s -N -X POST http://localhost:8000/api/converse -H 'Content-Type: application/json' -d '{"instruction":"say hello"}'`
 
@@ -112,7 +112,7 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:5173       # frontend
 Only start what returned non-200:
 ```bash
 # Backend (must run from project root)
-cd /Users/dhuynh95/claude_talks && source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000
+cd /Users/dhuynh95/claude_talks && source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000 --reload
 # Frontend
 cd /Users/dhuynh95/claude_talks/vibecoded_apps/claude_talks && npx vite --port 5173
 ```

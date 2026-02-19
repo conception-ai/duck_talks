@@ -3,7 +3,7 @@
 1. Servers 
 - If not started
     - Start both servers in background:
-        - `source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000`
+        - `source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000 --reload`
         - `cd vibecoded_apps/claude_talks && npx vite --port 5173`
 - Otherwise use currently run servers
 2. Use Chrome MCP to navigate to `http://localhost:5173/#/live`

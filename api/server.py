@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
@@ -14,8 +15,13 @@ from claude_client import Claude, TextDelta
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("api")
 
+_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
+_SYSTEM_PROMPT = (_PROMPT_DIR / "conversational_tone.md").read_text()
+
+log.info("system prompt loaded (%d chars):\n%s", len(_SYSTEM_PROMPT), _SYSTEM_PROMPT)
+
 app = FastAPI()
-claude = Claude(cwd="/Users/dhuynh95/claude_talks")
+claude = Claude(cwd="/Users/dhuynh95/claude_talks", system_prompt=_SYSTEM_PROMPT)
 
 # Sentence-ending punctuation followed by space/newline, or standalone newline
 _BREAK = re.compile(r"(?<=[.!?])\s|(?<=\n)")
@@ -48,6 +54,7 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
         n_chunks = 0
         async for chunk in claude.converse(body.instruction):
             if isinstance(chunk, TextDelta):
+                log.info("raw delta: %s", chunk.text[:120])
                 buf += chunk.text
                 while (idx := _sentence_break(buf)) >= 0:
                     sentence = buf[: idx + 1].strip()
