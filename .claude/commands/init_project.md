@@ -23,7 +23,8 @@ Your code must be clean, minimalist and easy to read.
 | @vibecoded_apps/claude_talks/src/routes/live/audio.ts | Browser audio I/O |
 | @vibecoded_apps/claude_talks/src/routes/live/models.ts | Shared types (SessionInfo) |
 | @vibecoded_apps/claude_talks/src/routes/live/tools.ts | Gemini function declarations + handlers |
-| @vibecoded_apps/claude_talks/src/lib/llm.ts | LLM abstraction — `createLLM({ apiKey })` → callable with `.stream()` and `.json<T>()` |
+| @vibecoded_apps/claude_talks/src/lib/llm.ts | LLM abstraction — `createLLM({ apiKey })` → callable with `.stream()`, `.json<T>()`. Supports multimodal: `Message.content` accepts `string` or `Part[]` (text + `inlineData` for audio/images) |
+| @vibecoded_apps/claude_talks/src/lib/stt.ts | Pure audio utilities — `combineChunks` (merge base64 PCM), `chunksToWav` (PCM → WAV). No LLM dependency |
 | @docs/gemini-live-docs.md | Gemini Live API reference — capabilities, VAD config, function calling, session management |
 
 ## Guiding Principles
@@ -33,11 +34,18 @@ Your code must be clean, minimalist and easy to read.
 ## Gotchas
 
 - **Gemini Live**: use `types.LiveConnectConfig` + `types.Modality.AUDIO` (not raw dicts). `model_turn.parts` can be `None`. File input needs chunking + `audio_stream_end=True`.
+- **Audio format split**: Gemini Live (`sendRealtimeInput`) accepts raw PCM (`audio/pcm;rate=16000`). `generateContent` does NOT — it needs a proper container format (WAV, MP3, etc.). Use `chunksToWav()` from `stt.ts` to wrap PCM before passing to `llm()`. Confirmed by experiment: raw PCM → hallucinated output; WAV → correct transcription.
 - **Two injection channels** (`gemini.ts`): A Gemini Live session has two ways to send data — they can be used simultaneously on the same session.
   - `sendRealtimeInput` — **live audio stream**. Subject to VAD (auto-detects speech start/stop). Best-effort ordering. Use for: mic audio.
   - `sendClientContent` — **structured context injection**. No VAD. Deterministic ordering. Model responds only if `turnComplete: true`. Use for: prefilling context, feeding Claude text back. Audio `inlineData` parts work here (undocumented but confirmed). `turnComplete: true` crashes if sent before any audio has flowed — use `turnComplete: false` for context prefilling.
   - Ordering is guaranteed *within* each channel but *not across* them. Already mixed in practice: mic streams via `sendRealtimeInput` while Claude chunks are injected via `sendClientContent`.
-- **`inputTranscription` / `outputTranscription`** — confusingly named. Both are **server-sent events** (Gemini sends them to you as outputs). "input" = transcription of the **user's** mic audio. "output" = transcription of **Gemini's own** spoken response. `inputTranscription` comes from a **decoupled ASR pipeline** completely independent of the model's context window — system instructions, `sendClientContent` (text or audio), corrections — none of it reaches the ASR. Stateless black box: audio bytes in → text out. Confirmed experimentally: injecting audio examples via `sendClientContent` does NOT change `inputTranscription`.
+- **`inputTranscription` / `outputTranscription`** — confusingly named. Both are **server-sent events** (Gemini pushes them to you). "input" = transcription of the **user's** mic audio (from `sendRealtimeInput`). "output" = transcription of **Gemini's own** spoken response.
+  - **Confirmed by experiment** (recording: `what_is_latest_commit.json`, phrase "What is the latest commit?" → transcribed as "What is the latest complete?"):
+    1. `sendClientContent` text context (turnComplete: false) → `inputTranscription` **unchanged**
+    2. `sendClientContent` audio `inlineData` (turnComplete: false) → `inputTranscription` **unchanged**
+    3. `sendClientContent` with `turnComplete: true` as the first message → **disconnects** ("Request contains an invalid argument."). Works fine mid-conversation. Use `turnComplete: false` for prefilling.
+  - **Inference from (1) and (2):** `inputTranscription` appears to be produced by a pipeline that does not read the model's context window. This is consistent with a separate ASR frontend, but we only observed the effect — we did not directly inspect Gemini's internal architecture.
+  - **Not tested:** whether the model's *reasoning* (tool call args, `outputTranscription`) improves with audio context even when `inputTranscription` stays wrong. The correction may still help layer 2 even if it can't fix layer 1.
 - **Function calling**: `tools.ts` declares `TOOLS` (uses `Type` enum from SDK) + `handleToolCall()` (pure fetch). The `converse` tool is `NON_BLOCKING` + `SILENT` response — Gemini speaks an acknowledgment while Claude streams in the background. Chunks are fed back via `sendClientContent` so Gemini reads them aloud. The handler lives in `gemini.ts` (not `tools.ts`) because it needs the session ref.
 - **Converse phase gating** (`gemini.ts`): A `conversePhase` state machine (`idle` → `suppressing` → `relaying` → `idle`) gates both audio and text during converse. Key non-obvious timing: Gemini sends "Asking Claude" audio/text BEFORE the `toolCall` message arrives, so the ack naturally passes through while `conversePhase` is still `idle`. After the tool call, `suppressing` blocks Gemini's own audio + flushes the player. On first `sendClientContent` (Claude chunk), `relaying` re-enables audio (Gemini reads Claude aloud) but keeps blocking `outputTranscription` (the `[CLAUDE]:` echo is noise — Claude's text is already in `pendingTool.text` via `appendTool`). `holdForApproval` takes an optional `cancel` callback to reset the phase on reject.
 - **Svelte app**: Gemini API key is stored client-side in `localStorage` (`claude-talks:ui`), managed via modal in `ui.svelte.ts`. Flows through DI: `ui.apiKey` → `data.svelte.ts` (`getApiKey` dep) → `gemini.ts` (`ConnectDeps.apiKey`). Modal auto-opens on first visit if no key is set.
