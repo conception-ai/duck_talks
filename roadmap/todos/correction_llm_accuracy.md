@@ -90,74 +90,131 @@ sentence-level examples, so it pattern-matches on intent not on misheard words.
 
 ## What to try next
 
-### A. Word-level corrections instead of sentence-level
+### A. Audio-aware correction (primary approach)
 
-Store corrections as word/phrase pairs, not full sentences:
-  `"complete" → "commit"`, `"sweet" → "suite"`
+The `Correction` type already stores `audioChunks` (PCM 16kHz). We have
+the raw audio of what the user said. Send it to the LLM alongside the
+text so it can actually hear the user and make an informed decision.
 
-Extract these automatically when the user edits an instruction: diff the
-original vs edited text, find changed tokens, store only the changed pairs.
+**Why this is the right approach:** the core problem is the LLM is
+guessing based on text alone. It can't distinguish "the STT was wrong"
+from "the user said something different." With audio, the LLM can
+listen to what the user actually said and compare it to the transcription.
 
-The prompt becomes simple pattern matching:
-```
-Replace misheard words in this instruction using these known STT errors:
-- "complete" → "commit"
-- "sweet" → "suite"
+**Implementation — Gemini multimodal call:**
 
-If no words match, return the instruction unchanged.
-
-Instruction: "What is the latest complete?"
-```
-
-This is more constrained and less likely to hallucinate.
-
-### B. Test in isolation first (outside Gemini Live)
-
-Before integrating, test `correctInstruction` as a standalone function
-with various inputs. Build a small test harness:
+`llm.ts` already supports `Part[]` with `inlineData` via the `Message`
+type. The `Input` type accepts `string | Message[]`. So `correct.ts`
+can send audio directly:
 
 ```typescript
-// test-correction.ts
+import { combineChunks } from '../../lib/stt';  // already exists, combines PCM chunks
+
+async function correctInstruction(
+  llm: LLM, instruction: string, audioChunks: RecordedChunk[], corrections: Correction[],
+): Promise<string> {
+  const audio = combineChunks(audioChunks);  // base64 PCM
+
+  const result = await llm([{
+    role: 'user',
+    content: [
+      { inlineData: { data: audio, mimeType: 'audio/pcm;rate=16000' } },
+      { text: `The speech-to-text system transcribed this audio as:
+"${instruction}"
+
+Known transcription errors for this user:
+${corrections.map(c => `- "${c.heard}" was actually "${c.meant}"`).join('\n')}
+
+Listen to the audio. If the transcription has errors that match
+the known patterns, return the corrected text. If the transcription
+is accurate, return it unchanged.
+
+Return only the final text, nothing else.` },
+    ],
+  }]);
+
+  return result.trim() || instruction;
+}
+```
+
+**Key change:** the function signature gains `audioChunks` parameter.
+The audio is the `pendingApproval.audioChunks` captured by
+`snapshotUtterance()` in `gemini.ts:135` before `commitTurn()` clears
+the buffer.
+
+**What needs to change:**
+
+| File | Change |
+|------|--------|
+| `correct.ts` | Add `audioChunks` param, build multimodal `Message[]` |
+| `gemini.ts:210` | Pass `audioChunks` to `correctInstruction` |
+| `+page.svelte:28-32` | Update DI closure to forward audio chunks |
+| `types.ts` (DataStoreMethods) | No change — `snapshotUtterance` already returns chunks |
+
+**Wiring in gemini.ts (line 210):**
+
+Currently:
+```typescript
+deps.correctInstruction(instruction).then(...)
+```
+
+Becomes:
+```typescript
+deps.correctInstruction(instruction, audioChunks).then(...)
+```
+
+The `audioChunks` are already available in scope — captured at line 135.
+
+### B. Test in isolation first (before integrating)
+
+Build a standalone test script that calls the multimodal correction
+function with known recordings + known corrections. No Gemini Live needed.
+
+```typescript
+// test-correction.ts — run with: npx tsx test-correction.ts
+import { createLLM } from './src/lib/llm';
+import { correctInstruction } from './src/routes/live/correct';
+
+const llm = createLLM({ apiKey: process.env.GEMINI_API_KEY! });
+
+// Load a recording's audio chunks
+const recording = JSON.parse(fs.readFileSync(
+  'public/recordings/what_is_latest_commit.json', 'utf-8'
+));
+
 const corrections = [
-  { heard: 'complete', meant: 'commit' },
-  { heard: 'sweet', meant: 'suite' },
+  { type: 'stt', heard: 'complete', meant: 'commit', audioChunks: [] },
 ];
 
 const cases = [
-  { input: 'What is the latest complete?', expected: 'What is the latest commit?' },
-  { input: 'Run the test sweet', expected: 'Run the test suite' },
-  { input: 'What is a closure?', expected: 'What is a closure?' },  // no change
-  { input: 'Tell me the latest complete and the test sweet',
-    expected: 'Tell me the latest commit and the test suite' },      // two fixes
+  // STT got it wrong — correction should apply
+  { instruction: 'What is the latest complete?', expected: 'What is the latest commit?' },
+  // STT got it right — should be unchanged
+  { instruction: 'What is the latest commit?', expected: 'What is the latest commit?' },
+  // Unrelated instruction — should be unchanged
+  { instruction: 'What is a closure?', expected: 'What is a closure?' },
 ];
+
+for (const c of cases) {
+  const result = await correctInstruction(llm, c.instruction, recording.chunks, corrections);
+  const pass = result === c.expected;
+  console.log(`${pass ? 'PASS' : 'FAIL'} "${c.instruction}" → "${result}" (expected "${c.expected}")`);
+}
 ```
 
 Run each case 3-5 times to measure consistency (LLM output is stochastic).
 
-### C. Audio-aware correction (longer term)
+**Key insight:** test with audio AND without audio. The audio is what
+gives the LLM ground truth. Without audio, compare to text-only baseline
+to quantify the improvement.
 
-The `Correction` type already stores `audioChunks`. The LLM could receive
-audio alongside text to make better decisions. Two approaches:
+### C. Constrained output (combine with A)
 
-1. **Gemini multimodal call** — send audio + text prompt to `createLLM`.
-   The `llm.ts` abstraction already supports `Part[]` with `inlineData`.
-   Prompt: "Listen to this audio. The STT transcribed it as X. Based on
-   what you hear, should it be corrected to Y?"
-
-2. **Calibration loop** (from research doc `plans/002_stt_correction_research.md`):
-   Feed correction audio via `sendRealtimeInput` at session start, paired
-   with text labels. This was proven to work in experiments 8/9 but was
-   stripped in Phase 1 because `sendClientContent` with audio was brittle.
-   The `sendRealtimeInput` approach is different and did work — could be
-   revisited.
-
-### D. Constrained output
-
-Force the LLM to return structured JSON instead of free text:
+Force structured JSON to avoid ambiguity:
 
 ```typescript
 const result = await llm.json<{ corrected: string; changed: boolean }>(
-  prompt,
+  messages,
   {
     type: 'object',
     properties: {
@@ -169,8 +226,16 @@ const result = await llm.json<{ corrected: string; changed: boolean }>(
 );
 ```
 
-The `changed` field lets us skip unnecessary rewrites and avoids the
-"return the instruction unchanged" ambiguity.
+The `changed` field eliminates the "return unchanged" ambiguity.
+
+### D. Word-level corrections (optional refinement)
+
+Extract word/phrase diffs from sentence-level corrections automatically.
+`"What is the latest complete?" → "What is the latest commit?"` becomes
+`"complete" → "commit"`. More constrained examples = less hallucination.
+
+Could be a post-processing step in `corrections.svelte.ts:addSTT()` or
+computed on-the-fly in `correct.ts`.
 
 ## Timing issue (separate but related)
 
