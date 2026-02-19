@@ -11,7 +11,6 @@ import type {
   AudioPort,
   AudioSink,
   AudioSource,
-  Correction,
   ConverseApi,
   LiveBackend,
   PendingApproval,
@@ -25,7 +24,6 @@ interface DataStoreDeps {
   api: ConverseApi;
   getApiKey: () => string | null;
   getLearningMode: () => boolean;
-  getCorrections: () => Correction[];
   getPttMode: () => boolean;
 }
 
@@ -165,18 +163,8 @@ export function createDataStore(deps: DataStoreDeps) {
   }
 
   function approve(editedText?: string) {
-    if (!pendingApproval) return;
-
-    if (pendingApproval.stage === 'stt') {
-      // Stage 1 done — advance to tool-call approval
-      pendingApproval = { ...pendingApproval, stage: 'tool-call' };
-      return;
-    }
-
-    // Stage 2: execute converse
-    if (!pendingExecute) return;
-    const instruction =
-      editedText ?? String(pendingApproval.toolCall.args.instruction ?? '');
+    if (!pendingApproval || !pendingExecute) return;
+    const instruction = editedText ?? pendingApproval.instruction;
     if (pendingTool) pendingTool.args = { instruction };
     pendingExecute(instruction);
     pendingApproval = null;
@@ -225,7 +213,6 @@ export function createDataStore(deps: DataStoreDeps) {
       tag: 'live',
       apiKey,
       getLearningMode: deps.getLearningMode,
-      corrections: deps.getCorrections(),
       pttMode,
     });
     if (!backend) return;
@@ -303,7 +290,6 @@ export function createDataStore(deps: DataStoreDeps) {
       tag: 'replay',
       apiKey,
       getLearningMode: deps.getLearningMode,
-      corrections: deps.getCorrections(),
       pttMode: false,
     });
     if (!backend) return;

@@ -61,7 +61,7 @@ import {
   type LiveServerMessage,
 } from '@google/genai';
 import { TOOLS, handleToolCall } from './tools';
-import type { AudioSink, Correction, ConverseApi, DataStoreMethods, LiveBackend } from './types';
+import type { AudioSink, ConverseApi, DataStoreMethods, LiveBackend } from './types';
 
 const BASE_PROMPT = `
 You are a voice relay between a user and Claude Code (a powerful coding agent).
@@ -75,22 +75,8 @@ You are a voice relay between a user and Claude Code (a powerful coding agent).
 </RULES>
 
 You are a transparent bridge. The user is talking TO Claude Code THROUGH you. You never answer on Claude Code's behalf.
-`;
 
-function buildSystemPrompt(corrections: Correction[]): string {
-  const stt = corrections.filter((c) => c.type === 'stt');
-  if (!stt.length) return BASE_PROMPT;
-
-  const lines = stt.map(
-    (c) => `- You transcribed: "${c.heard}" → They said: "${c.meant}"`,
-  );
-  return `${BASE_PROMPT}
-<STT_CORRECTIONS>
-Your transcription often gets these wrong with this user:
-${lines.join('\n')}
-</STT_CORRECTIONS>
 `;
-}
 
 const MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
 
@@ -101,7 +87,6 @@ interface ConnectDeps {
   tag: string;
   apiKey: string;
   getLearningMode: () => boolean;
-  corrections: Correction[];
   pttMode: boolean;
 }
 
@@ -129,7 +114,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       userSpokeInTurn = false; // Tool was called, don't nudge
       // Snapshot BEFORE commitTurn clears the buffer
       const learningMode = deps.getLearningMode();
-      const utterance = learningMode ? data.snapshotUtterance() : null;
+      const audioChunks = learningMode ? data.snapshotUtterance().audioChunks : [];
 
       data.commitTurn();
       for (const fc of message.toolCall.functionCalls) {
@@ -199,19 +184,12 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             });
           };
 
-          if (utterance) {
-            // Learning mode: pause for user to Accept/Edit/Reject the STT
-            // and tool call before executing. Phase stays `suppressing` the
-            // entire time — no audio or text leaks while waiting.
-            // Third arg: cancel callback resets phase if user rejects.
+          if (learningMode) {
+            // Learning mode: pause for user to Accept/Edit/Reject before
+            // executing. Phase stays `suppressing` — no audio or text leaks.
             console.log(`[${tag}] learning mode: holding converse for approval`);
             data.holdForApproval(
-              {
-                stage: 'stt',
-                toolCall: { name: fc.name!, args: fc.args ?? {} },
-                transcription: utterance.transcription,
-                audioChunks: utterance.audioChunks,
-              },
+              { instruction, audioChunks },
               executeConverse,
               () => { conversePhase = 'idle'; },
             );
@@ -286,14 +264,12 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   }
 
   try {
-    const systemPrompt = buildSystemPrompt(deps.corrections);
-    console.log(`[${tag}] system prompt:`, systemPrompt.slice(0, 200));
     const session = await ai.live.connect({
       model: MODEL,
       config: {
         responseModalities: [Modality.AUDIO],
         tools: TOOLS,
-        systemInstruction: systemPrompt,
+        systemInstruction: BASE_PROMPT,
         inputAudioTranscription: {},
         outputAudioTranscription: {},
         ...(deps.pttMode && {

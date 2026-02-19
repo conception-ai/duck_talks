@@ -44,9 +44,7 @@ export type Correction = STTCorrection;
 // --- Learning mode approval ---
 
 export interface PendingApproval {
-  stage: 'stt' | 'tool-call';
-  toolCall: ToolCall;
-  transcription: string;
+  instruction: string;
   audioChunks: RecordedChunk[];
 }
 
@@ -95,10 +93,15 @@ export interface RealtimeInput {
   activityEnd?: Record<string, never>;
 }
 
+export interface ContentPart {
+  text?: string;
+  inlineData?: { data: string; mimeType: string };
+}
+
 export interface LiveBackend {
   sendRealtimeInput(input: RealtimeInput): void;
   sendClientContent(content: {
-    turns: { role: string; parts: { text: string }[] }[];
+    turns: { role: string; parts: ContentPart[] }[];
     turnComplete: boolean;
   }): void;
   sendToolResponse(response: unknown): void;
