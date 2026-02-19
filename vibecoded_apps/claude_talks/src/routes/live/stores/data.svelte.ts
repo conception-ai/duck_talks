@@ -249,6 +249,7 @@ export function createDataStore(deps: DataStoreDeps) {
     player = null;
     backend?.close();
     backend = null;
+    api.sessionId = null;
     status = 'idle';
   }
 
@@ -351,6 +352,8 @@ export function createDataStore(deps: DataStoreDeps) {
     get pendingTool() { return pendingTool; },
     get pendingApproval() { return pendingApproval; },
     get pttActive() { return pttActive; },
+    get claudeSessionId() { return api.sessionId; },
+    setClaudeSession(id: string | null) { api.sessionId = id; },
     approve,
     reject,
     start,

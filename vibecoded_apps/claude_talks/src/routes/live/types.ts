@@ -115,6 +115,7 @@ export interface LiveBackend {
 // --- Port: Claude Code converse API ---
 
 export interface ConverseApi {
+  sessionId: string | null;
   stream(
     instruction: string,
     callbacks: {

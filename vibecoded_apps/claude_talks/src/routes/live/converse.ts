@@ -6,14 +6,19 @@
 import type { ConverseApi } from './types';
 
 export function createConverseApi(endpoint = '/api/converse'): ConverseApi {
+  let sessionId: string | null = null;
+
   return {
+    get sessionId() { return sessionId; },
+    set sessionId(id: string | null) { sessionId = id; },
+
     async stream(instruction, { onChunk, onDone, onError }) {
-      console.log('[converse] starting:', instruction.slice(0, 120));
+      console.log('[converse] starting:', instruction.slice(0, 120), 'session:', sessionId);
       try {
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ instruction }),
+          body: JSON.stringify({ instruction, session_id: sessionId }),
         });
         if (!res.ok || !res.body) {
           console.error('[converse] fetch failed:', res.status);
@@ -45,8 +50,9 @@ export function createConverseApi(endpoint = '/api/converse'): ConverseApi {
               onChunk(data.text);
             }
             if (data.done) {
+              if (data.session_id) sessionId = data.session_id;
               console.log(
-                `[converse] done: ${nChunks} chunks, cost=$${data.cost_usd}, ${data.duration_ms}ms`,
+                `[converse] done: ${nChunks} chunks, cost=$${data.cost_usd}, ${data.duration_ms}ms, session=${sessionId}`,
               );
               onDone?.(data.cost_usd, data.duration_ms);
             }

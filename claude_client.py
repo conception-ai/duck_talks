@@ -37,6 +37,7 @@ class TextDelta:
 
 @dataclass
 class Result:
+    session_id: str
     cost_usd: float | None
     duration_ms: int
 
@@ -61,7 +62,6 @@ class Claude:
     """
 
     _options: ClaudeAgentOptions
-    _session_id: str | None
 
     def __init__(
         self,
@@ -79,13 +79,14 @@ class Claude:
             env={"CLAUDE_CONFIG_DIR": _SDK_CONFIG_DIR},
             stderr=lambda line: log.debug("sdk: %s", line.rstrip()),
         )
-        self._session_id = None
 
-    async def converse(self, message: str) -> AsyncIterator[Chunk]:
+    async def converse(
+        self, message: str, session_id: str | None = None
+    ) -> AsyncIterator[Chunk]:
         options = self._options
-        if self._session_id:
-            options = replace(self._options, resume=self._session_id)
-            log.info("resuming session %s", self._session_id)
+        if session_id:
+            options = replace(self._options, resume=session_id)
+            log.info("resuming session %s", session_id)
 
         log.info("query: %s", message[:120])
         async for msg in query(prompt=message, options=options):
@@ -94,7 +95,6 @@ class Claude:
                 if text := delta.get("text"):
                     yield TextDelta(text=text)
             elif isinstance(msg, ResultMessage):
-                self._session_id = msg.session_id
                 log.info(
                     "result: session=%s, cost=$%s, %dms",
                     msg.session_id,
@@ -102,6 +102,7 @@ class Claude:
                     msg.duration_ms,
                 )
                 yield Result(
+                    session_id=msg.session_id,
                     cost_usd=msg.total_cost_usd,
                     duration_ms=msg.duration_ms,
                 )

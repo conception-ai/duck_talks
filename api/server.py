@@ -92,6 +92,7 @@ def _sse(data: dict[str, object]) -> str:
 
 class ConverseRequest(BaseModel):
     instruction: str
+    session_id: str | None = None
 
 
 @app.post("/api/converse")
@@ -101,7 +102,9 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
     async def stream():  # noqa: ANN202
         buf = ""
         n_chunks = 0
-        async for chunk in claude.converse(body.instruction):
+        async for chunk in claude.converse(
+            body.instruction, session_id=body.session_id
+        ):
             if isinstance(chunk, TextDelta):
                 log.info("raw delta: %s", chunk.text[:120])
                 buf += chunk.text
@@ -126,6 +129,7 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
                 yield _sse(
                     {
                         "done": True,
+                        "session_id": chunk.session_id,
                         "cost_usd": chunk.cost_usd,
                         "duration_ms": chunk.duration_ms,
                     }

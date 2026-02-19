@@ -8,3 +8,4 @@ dist/
 .DS_Store
 vibecoded_apps/claude_talks/.env
 .claude/commands/claude_talks.code-workspace
+cc-relay/
