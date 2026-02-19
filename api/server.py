@@ -8,12 +8,12 @@ import os
 import re
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from claude_client import Claude, TextDelta
-from models import Conversation
+from models import AssistantEntry, Conversation, UserEntry, preview
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("api")
@@ -70,6 +70,82 @@ def list_sessions() -> list[SessionInfo]:
             )
         )
     return sessions
+
+
+def _load_conversation(session_id: str) -> Conversation:
+    """Resolve session ID to file and load. Raises 404 if not found."""
+    path = _PROJECT_DIR / f"{session_id}.jsonl"
+    if not path.is_file():
+        raise HTTPException(404, f"Session not found: {session_id}")
+    return Conversation.from_jsonl(str(path))
+
+
+class LeafInfo(BaseModel):
+    uuid: str
+    type: str
+    depth: int
+    preview: str
+    is_active: bool
+
+
+@app.get("/api/sessions/{session_id}/leaves")
+def get_leaves(session_id: str) -> list[LeafInfo]:
+    conv = _load_conversation(session_id)
+    active = conv.active_leaf
+    active_uuid = active.uuid if active else None
+    result: list[LeafInfo] = []
+    for leaf in conv.leaves:
+        result.append(
+            LeafInfo(
+                uuid=leaf.uuid,
+                type=leaf.type,
+                depth=len(conv.walk_path(leaf.uuid)),
+                preview=preview(leaf),
+                is_active=leaf.uuid == active_uuid,
+            )
+        )
+    result.sort(key=lambda x: x.depth, reverse=True)
+    return result
+
+
+class PathEntry(BaseModel):
+    uuid: str
+    type: str
+    role: str | None
+    preview: str
+
+
+@app.get("/api/sessions/{session_id}/path")
+def get_path(
+    session_id: str,
+    leaf: str | None = None,
+    filter: str | None = None,
+) -> list[PathEntry]:
+    conv = _load_conversation(session_id)
+    if leaf:
+        leaf_uuid = leaf
+    else:
+        active = conv.active_leaf
+        if not active:
+            raise HTTPException(404, "No active leaf found")
+        leaf_uuid = active.uuid
+
+    path = conv.walk_path(leaf_uuid)
+    if not path:
+        raise HTTPException(404, f"UUID not found in tree: {leaf_uuid}")
+
+    if filter == "messages":
+        path = [e for e in path if e.type in ("user", "assistant")]
+
+    return [
+        PathEntry(
+            uuid=e.uuid,
+            type=e.type,
+            role=e.message.role if isinstance(e, (UserEntry, AssistantEntry)) else None,
+            preview=preview(e),
+        )
+        for e in path
+    ]
 
 
 # Sentence-ending punctuation followed by space/newline, or standalone newline

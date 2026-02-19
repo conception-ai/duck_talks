@@ -25,11 +25,12 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from collections.abc import Iterable
 from typing import Any, ClassVar, Literal, TypedDict, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter
 
 
 # JSON data (use Any since pydantic can't handle recursive types)
@@ -312,6 +313,75 @@ SessionEntry = (
     | PrLinkEntry
 )
 
+# Entries that participate in the UUID tree (have both uuid and parentUuid)
+TreeEntry = UserEntry | AssistantEntry | ProgressEntry | SystemEntry
+
+
+# --- Tree Index ---
+
+
+@dataclass(frozen=True)
+class _TreeIndex:
+    """Lazy-built index for tree navigation."""
+
+    by_uuid: dict[str, list[TreeEntry]]
+    parent_refs: frozenset[str]
+
+    @staticmethod
+    def build(records: list[SessionEntry]) -> _TreeIndex:
+        by_uuid: dict[str, list[TreeEntry]] = {}
+        parent_refs: set[str] = set()
+        for r in records:
+            if not isinstance(
+                r, (UserEntry, AssistantEntry, ProgressEntry, SystemEntry)
+            ):
+                continue
+            by_uuid.setdefault(r.uuid, []).append(r)
+            if r.parentUuid:
+                parent_refs.add(r.parentUuid)
+        return _TreeIndex(by_uuid=by_uuid, parent_refs=frozenset(parent_refs))
+
+
+def preview(entry: TreeEntry, limit: int = 100) -> str:
+    """One-line human-readable summary of a tree entry."""
+    uid = entry.uuid[:8]
+    etype = entry.type
+
+    if not isinstance(entry, (UserEntry, AssistantEntry)):
+        extra = ""
+        if isinstance(entry, SystemEntry) and entry.subtype:
+            extra = entry.subtype
+        return f"{etype:10s} {uid}  {extra}"
+
+    content = entry.message.content
+    if isinstance(content, str):
+        text = content.strip().replace("\n", " ")[:limit]
+    else:
+        parts: list[str] = []
+        for b in content:
+            # AssistantEntry: content blocks are pydantic models
+            if isinstance(b, TextContent):
+                parts.append(b.text.replace("\n", " ")[:60])
+            elif isinstance(b, ThinkingContent):
+                parts.append("[think]")
+            elif isinstance(b, ToolUseContent):
+                parts.append(f"[tool:{b.name}]")
+            elif isinstance(b, ToolResultContent):
+                parts.append("[result]")
+            # UserEntry: content blocks are raw dicts (tool_result payloads)
+            elif isinstance(b, dict):
+                btype = cast(str, b.get("type", ""))
+                if btype == "tool_result":
+                    parts.append("[result]")
+                elif btype == "text":
+                    parts.append(cast(str, b.get("text", "")).replace("\n", " ")[:60])
+                else:
+                    parts.append(f"[{btype or 'dict'}]")
+            else:
+                parts.append(f"[{type(b).__name__}]")
+        text = " | ".join(parts)[:limit]
+    return f"{etype:10s} {uid}  {text}"
+
 
 # --- High-Level Session ---
 
@@ -449,6 +519,7 @@ class Conversation(BaseModel):
     """Read-only container for loading and querying JSONL conversation files."""
 
     records: list[SessionEntry] = Field(default_factory=list)
+    _tree_cache: _TreeIndex | None = PrivateAttr(default=None)
 
     @classmethod
     def from_jsonl(cls, path: str) -> Conversation:
@@ -525,6 +596,52 @@ class Conversation(BaseModel):
     def message_count(self) -> int:
         """Number of user + assistant entries."""
         return len(self.user_entries) + len(self.assistant_entries)
+
+    # ── Tree navigation ──
+
+    @property
+    def _tree(self) -> _TreeIndex:
+        if self._tree_cache is None:
+            self._tree_cache = _TreeIndex.build(self.records)
+        return self._tree_cache
+
+    @property
+    def leaves(self) -> list[TreeEntry]:
+        """Entries whose uuid is never referenced as another entry's parentUuid."""
+        t = self._tree
+        return [
+            elist[-1] for uid, elist in t.by_uuid.items() if uid not in t.parent_refs
+        ]
+
+    @property
+    def active_leaf(self) -> TreeEntry | None:
+        """Tip of the active branch: last summary's leafUuid, else deepest leaf."""
+        t = self._tree
+        # Check summaries first
+        for r in reversed(self.records):
+            if isinstance(r, SummaryEntry) and r.leafUuid and r.leafUuid in t.by_uuid:
+                return t.by_uuid[r.leafUuid][-1]
+        # Fall back to deepest leaf
+        all_leaves = self.leaves
+        if not all_leaves:
+            return None
+        return max(all_leaves, key=lambda e: len(self.walk_path(e.uuid)))
+
+    def walk_path(self, leaf_uuid: str) -> list[TreeEntry]:
+        """Walk parentUuid chain from leaf to root. Returns [leaf, ..., root]."""
+        t = self._tree
+        path: list[TreeEntry] = []
+        seen: set[str] = set()
+        uid: str | None = leaf_uuid
+        while uid and uid not in seen:
+            seen.add(uid)
+            elist = t.by_uuid.get(uid)
+            if not elist:
+                break
+            entry = elist[-1]  # last occurrence handles retried dupes
+            path.append(entry)
+            uid = entry.parentUuid
+        return path
 
     # ── Private helpers ──
 
