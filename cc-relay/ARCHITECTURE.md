@@ -141,7 +141,6 @@ Copy everything between the `---` lines and paste it as a single message into
 your Claude Code Web session:
 
 ---
-```markdown
 Create a file called `server.py` with the exact content below, then run these commands:
 
 ```bash
@@ -262,7 +261,6 @@ async def echo(request: Request):
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=LOCAL_PORT)
-```
 ```
 ---
 
