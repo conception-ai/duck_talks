@@ -8,12 +8,17 @@ Usage:
 
 import asyncio
 import json
+import logging
 import os
+import ssl
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
+
+log = logging.getLogger("bridge")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 import uvicorn
 from fastapi import FastAPI, Request
 
@@ -27,7 +32,9 @@ LOCAL_PORT = 8000
 
 async def bridge_loop() -> None:
     """Poll the relay for pending requests and forward them to the local server."""
-    async with httpx.AsyncClient() as relay, httpx.AsyncClient() as local:
+    ctx = ssl.create_default_context()
+    async with httpx.AsyncClient(verify=ctx) as relay, httpx.AsyncClient() as local:
+        log.info("bridge started, polling %s", RELAY_URL)
         while True:
             try:
                 resp = await relay.get(
@@ -72,7 +79,7 @@ async def bridge_loop() -> None:
                             timeout=10,
                         )
             except Exception:
-                pass  # relay unreachable, retry
+                log.exception("bridge poll error")
             await asyncio.sleep(1)
 
 
