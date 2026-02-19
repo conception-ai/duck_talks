@@ -123,18 +123,128 @@ wrangler deploy
 
 ### 2. Start the server in a Claude Code Web sandbox
 
-In the sandbox's Claude Code session, paste server.py then run:
+Copy everything between the `---` lines and paste it as a single message into
+your Claude Code Web session:
+
+---
+
+Create a file called `server.py` with the exact content below, then run these commands:
 
 ```bash
 pip install fastapi uvicorn httpx
-RELAY_TOKEN=<your-token> nohup python server.py > /tmp/server.log 2>&1 &
+RELAY_TOKEN=cc-relay-0dc090e4fd95c0e422fb02c5784f06a5 nohup python server.py > /tmp/server.log 2>&1 &
+sleep 3 && curl -s http://127.0.0.1:8000/hello
 ```
 
-Verify locally inside the sandbox:
-```bash
-curl -s http://127.0.0.1:8000/hello
-# → {"message":"Hello from Claude Code sandbox!"}
+Do NOT modify server.py. Write it exactly as provided.
+
+```python
+"""
+Minimal FastAPI server + relay bridge.
+Run this in the Claude Code Web sandbox to expose HTTP endpoints externally.
+"""
+
+import asyncio
+import json
+import logging
+import os
+import ssl
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+
+import httpx
+import uvicorn
+from fastapi import FastAPI, Request
+
+log = logging.getLogger("bridge")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+
+RELAY_URL = os.environ.get("RELAY_URL", "https://cc-relay.daniel-90c.workers.dev")
+RELAY_TOKEN = os.environ["RELAY_TOKEN"]
+LOCAL_PORT = 8000
+
+
+async def bridge_loop() -> None:
+    """Poll the relay for pending requests and forward them to the local server."""
+    ctx = ssl.create_default_context()
+    async with httpx.AsyncClient(verify=ctx) as relay, httpx.AsyncClient() as local:
+        log.info("bridge started, polling %s", RELAY_URL)
+        while True:
+            try:
+                resp = await relay.get(
+                    f"{RELAY_URL}/proxy/_poll",
+                    headers={"x-token": RELAY_TOKEN},
+                    timeout=10,
+                )
+                data = resp.json()
+                for req in data.get("requests", []):
+                    try:
+                        local_resp = await local.request(
+                            method=req["method"],
+                            url=f"http://127.0.0.1:{LOCAL_PORT}{req['path']}",
+                            content=req.get("body"),
+                            headers={"Content-Type": "application/json"},
+                            timeout=30,
+                        )
+                        _ = await relay.post(
+                            f"{RELAY_URL}/proxy/_respond",
+                            headers={"x-token": RELAY_TOKEN},
+                            json={
+                                "id": req["id"],
+                                "status": local_resp.status_code,
+                                "body": local_resp.text,
+                                "content_type": local_resp.headers.get(
+                                    "content-type", "application/json"
+                                ),
+                            },
+                            timeout=10,
+                        )
+                    except Exception as e:
+                        _ = await relay.post(
+                            f"{RELAY_URL}/proxy/_respond",
+                            headers={"x-token": RELAY_TOKEN},
+                            json={
+                                "id": req["id"],
+                                "status": 502,
+                                "body": json.dumps({"error": str(e)}),
+                                "content_type": "application/json",
+                            },
+                            timeout=10,
+                        )
+            except Exception:
+                log.exception("bridge poll error")
+            await asyncio.sleep(1)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    _ = asyncio.create_task(bridge_loop())
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/hello")
+async def hello():
+    return {"message": "Hello from Claude Code sandbox!"}
+
+
+@app.post("/echo")
+async def echo(request: Request):
+    body = await request.json()
+    return {"echo": body}
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=LOCAL_PORT)
 ```
+
+---
+
+The `sandbox/server.py` file in this repo has stricter type annotations for
+local linting but is functionally identical. When pasting into a sandbox, use
+the prompt above (no pyright strictness needed there).
 
 ### 3. Test from the outside
 
