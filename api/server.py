@@ -258,28 +258,3 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
                 )
 
     return StreamingResponse(stream(), media_type="text/event-stream")
-
-
-_TEST_CHUNKS = [
-    "A closure in Python is a function that remembers variables from the enclosing scope even after that scope has finished executing.",
-    "For example, if you define a function inside another function, and the inner function references a variable from the outer function, that variable is captured.",
-    "When you return the inner function and call it later, it still has access to that captured variable, even though the outer function is long gone.",
-    "This is really useful for things like factory functions, decorators, and callback patterns.",
-    "The key thing to understand is that the closure captures the variable itself, not just its value at the time of creation.",
-]
-
-
-@app.post("/api/converse/test")
-async def converse_test(_body: ConverseRequest) -> StreamingResponse:
-    """Simulated endpoint: streams 5 chunks over ~5 seconds, no Claude Code."""
-    log.info("converse/test: starting simulated stream")
-
-    async def stream():  # noqa: ANN202
-        for i, chunk in enumerate(_TEST_CHUNKS):
-            log.info("test chunk %d: %s", i + 1, chunk[:80])
-            yield _sse({"text": chunk})
-            await asyncio.sleep(1.0)
-        log.info("test done: %d chunks", len(_TEST_CHUNKS))
-        yield _sse({"done": True, "cost_usd": 0, "duration_ms": 5000})
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
