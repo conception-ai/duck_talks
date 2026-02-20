@@ -89,7 +89,6 @@ interface ConnectDeps {
   apiKey: string;
   getMode: () => InteractionMode;
   correctInstruction: (instruction: string) => Promise<string>;
-  pttMode: boolean;
 }
 
 /**
@@ -299,11 +298,6 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
         systemInstruction: BASE_PROMPT,
         inputAudioTranscription: {},
         outputAudioTranscription: {},
-        ...(deps.pttMode && {
-          realtimeInputConfig: {
-            automaticActivityDetection: { disabled: true },
-          },
-        }),
       },
       callbacks: {
         onopen: () => {

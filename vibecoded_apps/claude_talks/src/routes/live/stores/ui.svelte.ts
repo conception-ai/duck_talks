@@ -14,7 +14,6 @@ interface Persisted {
   voiceEnabled: boolean;
   apiKey: string | null;
   mode: InteractionMode;
-  pttMode: boolean;
   model: string;
   systemPrompt: string;
 }
@@ -31,7 +30,7 @@ function load(): Persisted {
       return parsed;
     }
   } catch { /* corrupted — fall through to default */ }
-  return { voiceEnabled: true, apiKey: null, mode: 'direct', pttMode: false,
+  return { voiceEnabled: true, apiKey: null, mode: 'direct',
            model: DEFAULT_MODEL, systemPrompt: DEFAULT_SYSTEM_PROMPT };
 }
 
@@ -43,14 +42,12 @@ export function createUIStore() {
   const persisted = load();
   let voiceEnabled = $state(persisted.voiceEnabled);
   let apiKey = $state<string | null>(persisted.apiKey);
-  let apiKeyModalOpen = $state(!apiKey);
   let mode = $state<InteractionMode>(persisted.mode);
-  let pttMode = $state(persisted.pttMode);
   let model = $state(persisted.model);
   let systemPrompt = $state(persisted.systemPrompt);
 
   function persist() {
-    save({ voiceEnabled, apiKey, mode, pttMode, model, systemPrompt });
+    save({ voiceEnabled, apiKey, mode, model, systemPrompt });
   }
 
   function toggleVoice() {
@@ -58,47 +55,25 @@ export function createUIStore() {
     persist();
   }
 
-  const MODE_CYCLE: InteractionMode[] = ['direct', 'review', 'correct'];
-
-  function cycleMode() {
-    const i = MODE_CYCLE.indexOf(mode);
-    mode = MODE_CYCLE[(i + 1) % MODE_CYCLE.length];
-    persist();
-  }
-
-  function togglePttMode() {
-    pttMode = !pttMode;
-    persist();
-  }
-
   function setApiKey(key: string) {
     const trimmed = key.trim();
     if (!trimmed) return;
     apiKey = trimmed;
-    apiKeyModalOpen = false;
     persist();
   }
 
-  function openApiKeyModal() {
-    apiKeyModalOpen = true;
-  }
-
-  function closeApiKeyModal() {
-    apiKeyModalOpen = false;
+  function setMode(m: InteractionMode) {
+    mode = m;
+    persist();
   }
 
   return {
     get voiceEnabled() { return voiceEnabled; },
     get apiKey() { return apiKey; },
-    get apiKeyModalOpen() { return apiKeyModalOpen; },
     get mode() { return mode; },
-    get pttMode() { return pttMode; },
     toggleVoice,
-    cycleMode,
-    togglePttMode,
     setApiKey,
-    openApiKeyModal,
-    closeApiKeyModal,
+    setMode,
     get model() { return model; },
     get systemPrompt() { return systemPrompt; },
     setModel(m: string) { model = m; persist(); },

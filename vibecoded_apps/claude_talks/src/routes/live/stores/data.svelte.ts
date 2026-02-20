@@ -30,7 +30,6 @@ interface DataStoreDeps {
   getApiKey: () => string | null;
   getMode: () => InteractionMode;
   correctInstruction: (instruction: string) => Promise<string>;
-  getPttMode: () => boolean;
 }
 
 export function createDataStore(deps: DataStoreDeps) {
@@ -47,10 +46,6 @@ export function createDataStore(deps: DataStoreDeps) {
   let pendingApproval = $state<PendingApproval | null>(null);
   let pendingExecute: ((instruction: string) => void) | null = null;
   let pendingCancel: (() => void) | null = null;
-
-  // --- PTT state ---
-  let pttMode = false;              // set at start(), gates mic callback
-  let pttActive = $state(false);    // reactive — UI shows button state
 
   // --- Audio buffer (for STT corrections) ---
   let audioBuffer: RecordedChunk[] = [];
@@ -258,8 +253,6 @@ export function createDataStore(deps: DataStoreDeps) {
       pushError('API key not set. Click "API Key" to configure.');
       return;
     }
-    pttMode = deps.getPttMode();
-    pttActive = false;
     sessionStart = Date.now();
     audioBuffer = [];
     player = audio.createPlayer();
@@ -271,13 +264,11 @@ export function createDataStore(deps: DataStoreDeps) {
       apiKey,
       getMode: deps.getMode,
       correctInstruction: deps.correctInstruction,
-      pttMode,
     });
     if (!backend) return;
 
     try {
       mic = await audio.startMic((base64) => {
-        if (pttMode && !pttActive) return;
         audioBuffer.push({ ts: Date.now() - sessionStart, data: base64 });
         backend?.sendRealtimeInput({
           audio: { data: base64, mimeType: 'audio/pcm;rate=16000' },
@@ -291,8 +282,6 @@ export function createDataStore(deps: DataStoreDeps) {
   }
 
   function stop() {
-    pttActive = false;
-    pttMode = false;
     if (pendingTool?.streaming) pendingTool.streaming = false;
     commitTurn();
     mic?.stop();
@@ -302,20 +291,6 @@ export function createDataStore(deps: DataStoreDeps) {
     backend?.close();
     backend = null;
     status = 'idle';
-  }
-
-  // --- PTT lifecycle ---
-
-  function pttPress() {
-    if (!pttMode || !backend) return;
-    pttActive = true;
-    backend.sendRealtimeInput({ activityStart: {} });
-  }
-
-  function pttRelease() {
-    if (!pttMode || !backend) return;
-    pttActive = false;
-    backend.sendRealtimeInput({ activityEnd: {} });
   }
 
   // --- Public surface ---
@@ -328,7 +303,6 @@ export function createDataStore(deps: DataStoreDeps) {
     get pendingOutput() { return pendingOutput; },
     get pendingTool() { return pendingTool; },
     get pendingApproval() { return pendingApproval; },
-    get pttActive() { return pttActive; },
     get claudeSessionId() { return api.sessionId; },
     setClaudeSession(id: string | null) { api.sessionId = id; },
     loadHistory,
@@ -337,7 +311,5 @@ export function createDataStore(deps: DataStoreDeps) {
     reject,
     start,
     stop,
-    pttPress,
-    pttRelease,
   };
 }

@@ -3,7 +3,7 @@
  * Same localStorage pattern as ui.svelte.ts.
  */
 
-import type { RecordedChunk } from '../recorder';
+import type { RecordedChunk } from '../types';
 import type { STTCorrection } from '../types';
 
 const STORAGE_KEY = 'claude-talks:corrections';

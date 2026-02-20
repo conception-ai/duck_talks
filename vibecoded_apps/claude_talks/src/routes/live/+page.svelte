@@ -8,7 +8,7 @@
   import { correctInstruction } from './correct';
   import { DEFAULT_SYSTEM_PROMPT } from './defaults';
   import { createLLM } from '../../lib/llm';
-  import type { AudioSink, ContentBlock, Message, STTCorrection } from './types';
+  import type { AudioSink, ContentBlock, InteractionMode, Message, STTCorrection } from './types';
 
   let { params } = $props<{ params?: { id?: string } }>();
 
@@ -38,7 +38,6 @@
       if (!key) return Promise.resolve(instruction);
       return correctInstruction(createLLM({ apiKey: key }), instruction, corrections.corrections);
     },
-    getPttMode: () => ui.pttMode,
   });
 
   // Load session history if route has an ID
@@ -91,14 +90,37 @@
       .map((b) => b.thinking);
   }
 
+  // --- Settings modal state ---
+  let settingsOpen = $state(!ui.apiKey);
   let keyDraft = $state(ui.apiKey ?? '');
-  let correctionsModalOpen = $state(false);
+  let voiceDraft = $state(ui.voiceEnabled);
+  let modeDraft = $state<InteractionMode>(ui.mode);
+  let modelDraft = $state(ui.model);
+  let promptDraft = $state(ui.systemPrompt);
+
+  function openSettings() {
+    keyDraft = ui.apiKey ?? '';
+    voiceDraft = ui.voiceEnabled;
+    modeDraft = ui.mode;
+    modelDraft = ui.model;
+    promptDraft = ui.systemPrompt;
+    settingsOpen = true;
+  }
+
+  function saveSettings() {
+    if (keyDraft.trim()) ui.setApiKey(keyDraft);
+    if (voiceDraft !== ui.voiceEnabled) ui.toggleVoice();
+    ui.setMode(modeDraft);
+    ui.setModel(modelDraft);
+    ui.setSystemPrompt(promptDraft);
+    settingsOpen = false;
+  }
+
+  // --- Corrections modal ---
+  let correctionsOpen = $state(false);
   let playingId = $state<string | null>(null);
   let stopPlaying: (() => void) | null = null;
   let showVoiceLog = $state(false);
-  let settingsOpen = $state(false);
-  let modelDraft = $state(ui.model);
-  let promptDraft = $state(ui.systemPrompt);
 
   function playCorrection(c: STTCorrection) {
     stopPlaying?.();
@@ -130,13 +152,12 @@
     stopPlaying = handle.stop;
     playingId = 'approval';
   }
-  let editing = $state(false);
 
+  let editing = $state(false);
   let editDraft = $state('');
 
   function handleAccept() {
-    const approval = live.pendingApproval;
-    if (!approval) return;
+    if (!live.pendingApproval) return;
     live.approve();
   }
 
@@ -165,48 +186,19 @@
     editing = false;
   }
 
+  const MODE_LABELS: Record<InteractionMode, string> = {
+    direct: 'Direct',
+    review: 'Review',
+    correct: 'Correct',
+  };
 </script>
 
 <main>
   <header>
-    <button class="header-sm" onclick={() => push('/')}>Home</button>
+    <button class="header-btn" onclick={() => push('/')}>Home</button>
     <h1>Gemini Live</h1>
-    <button class="header-sm" onclick={() => { keyDraft = ui.apiKey ?? ''; ui.openApiKeyModal(); }}>API Key</button>
-    <button class="header-sm" class:muted={!ui.voiceEnabled} onclick={ui.toggleVoice}>
-      {ui.voiceEnabled ? 'Voice On' : 'Voice Off'}
-    </button>
-    <button class="header-sm" class:active-mode={ui.mode !== 'direct'} onclick={ui.cycleMode}>
-      {ui.mode === 'direct' ? 'Direct' : ui.mode === 'review' ? 'Review' : 'Correct'}
-    </button>
-    <button class="header-sm" class:active-mode={ui.pttMode} onclick={ui.togglePttMode}
-      disabled={live.status !== 'idle'}>
-      {ui.pttMode ? 'PTT' : 'VAD'}
-    </button>
-    {#if corrections.corrections.length}
-      <button class="header-sm" onclick={() => { correctionsModalOpen = true; }}>
-        Corrections ({corrections.corrections.length})
-      </button>
-    {/if}
-    <button class="header-sm" onclick={() => {
-      modelDraft = ui.model; promptDraft = ui.systemPrompt; settingsOpen = true;
-    }}>Settings</button>
-    {#if live.status === 'idle'}
-      <button onclick={live.start}>Start</button>
-    {:else if live.status === 'connecting'}
-      <button disabled>Connecting...</button>
-    {:else}
-      <button onclick={live.stop}>Stop</button>
-    {/if}
+    <button class="header-btn" onclick={openSettings}>Settings</button>
   </header>
-
-  {#if live.status === 'connected' && ui.pttMode}
-    <button class="ptt-button" class:ptt-active={live.pttActive}
-      onpointerdown={live.pttPress}
-      onpointerup={live.pttRelease}
-      onpointerleave={live.pttRelease}>
-      {live.pttActive ? 'Listening...' : 'Hold to Talk'}
-    </button>
-  {/if}
 
   {#if historyLoading}
     <p class="loading">Loading conversation...</p>
@@ -314,31 +306,88 @@
       {/if}
     </div>
   {/if}
+
+  <!-- Mic orb -->
+  <div class="mic-area">
+    <span class="mode-label">{MODE_LABELS[ui.mode]}</span>
+    <button
+      class="mic-orb"
+      class:connected={live.status === 'connected'}
+      class:connecting={live.status === 'connecting'}
+      disabled={live.status === 'connecting'}
+      onclick={() => live.status === 'idle' ? live.start() : live.stop()}
+    >
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+        <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+      </svg>
+    </button>
+  </div>
 </main>
 
-{#if ui.apiKeyModalOpen}
+<!-- Settings modal (consolidated) -->
+{#if settingsOpen}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="backdrop" onkeydown={() => {}} onclick={ui.closeApiKeyModal}>
+  <div class="backdrop" onkeydown={() => {}} onclick={() => { settingsOpen = false; }}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal" onkeydown={() => {}} onclick={(e) => e.stopPropagation()}>
-      <h2>Gemini API Key</h2>
-      <input
-        type="password"
-        placeholder="Enter your API key"
-        bind:value={keyDraft}
-        onkeydown={(e) => { if (e.key === 'Enter') ui.setApiKey(keyDraft); }}
-      />
+    <div class="modal settings-modal" onkeydown={() => {}} onclick={(e) => e.stopPropagation()}>
+      <h2>Settings</h2>
+
+      <label>
+        API Key
+        <input type="password" placeholder="Gemini API key" bind:value={keyDraft} />
+      </label>
+
+      <label>
+        Voice Playback
+        <select bind:value={voiceDraft}>
+          <option value={true}>On</option>
+          <option value={false}>Off</option>
+        </select>
+      </label>
+
+      <label>
+        Mode
+        <select bind:value={modeDraft}>
+          <option value="direct">Direct</option>
+          <option value="review">Review</option>
+          <option value="correct">Correct</option>
+        </select>
+      </label>
+
+      <label>
+        Model
+        <select bind:value={modelDraft}>
+          <option value="haiku">Haiku</option>
+          <option value="sonnet">Sonnet</option>
+          <option value="opus">Opus</option>
+        </select>
+      </label>
+
+      <label>
+        System Prompt
+        <textarea bind:value={promptDraft} rows="8"></textarea>
+      </label>
+
+      {#if corrections.corrections.length}
+        <div class="corrections-link">
+          <span>Corrections ({corrections.corrections.length})</span>
+          <button class="link-btn" onclick={() => { correctionsOpen = true; }}>View</button>
+        </div>
+      {/if}
+
       <div class="modal-actions">
-        <button onclick={ui.closeApiKeyModal}>Cancel</button>
-        <button onclick={() => ui.setApiKey(keyDraft)}>Save</button>
+        <button onclick={() => { promptDraft = DEFAULT_SYSTEM_PROMPT; }}>Reset Prompt</button>
+        <button onclick={() => { settingsOpen = false; }}>Cancel</button>
+        <button onclick={saveSettings}>Save</button>
       </div>
     </div>
   </div>
 {/if}
 
-{#if correctionsModalOpen}
+<!-- Corrections modal -->
+{#if correctionsOpen}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="backdrop" onkeydown={() => {}} onclick={() => { correctionsModalOpen = false; }}>
+  <div class="backdrop" onkeydown={() => {}} onclick={() => { correctionsOpen = false; }}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal" onkeydown={() => {}} onclick={(e) => e.stopPropagation()}>
       <h2>STT Corrections</h2>
@@ -362,38 +411,7 @@
         <p class="correction-empty">No corrections yet.</p>
       {/if}
       <div class="modal-actions">
-        <button onclick={() => { correctionsModalOpen = false; }}>Close</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-{#if settingsOpen}
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="backdrop" onkeydown={() => {}} onclick={() => { settingsOpen = false; }}>
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="modal settings-modal" onkeydown={() => {}} onclick={(e) => e.stopPropagation()}>
-      <h2>Settings</h2>
-      <label>
-        Model
-        <select bind:value={modelDraft}>
-          <option value="haiku">Haiku</option>
-          <option value="sonnet">Sonnet</option>
-          <option value="opus">Opus</option>
-        </select>
-      </label>
-      <label>
-        System Prompt
-        <textarea bind:value={promptDraft} rows="10"></textarea>
-      </label>
-      <div class="modal-actions">
-        <button onclick={() => { promptDraft = DEFAULT_SYSTEM_PROMPT; }}>Reset Prompt</button>
-        <button onclick={() => { settingsOpen = false; }}>Cancel</button>
-        <button onclick={() => {
-          ui.setModel(modelDraft);
-          ui.setSystemPrompt(promptDraft);
-          settingsOpen = false;
-        }}>Save</button>
+        <button onclick={() => { correctionsOpen = false; }}>Close</button>
       </div>
     </div>
   </div>
@@ -404,6 +422,9 @@
     max-width: 600px;
     margin: 2rem auto;
     font-family: system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100vh - 4rem);
   }
 
   header {
@@ -413,8 +434,14 @@
     margin-bottom: 1rem;
   }
 
-  h1 {
+  header h1 {
     margin: 0;
+    flex: 1;
+    text-align: center;
+  }
+
+  .header-btn {
+    font-size: 0.8rem;
   }
 
   button {
@@ -429,18 +456,6 @@
   button:disabled {
     opacity: 0.5;
     cursor: default;
-  }
-
-  .header-sm {
-    font-size: 0.75rem;
-  }
-
-  .header-sm:nth-of-type(2) {
-    margin-left: auto;
-  }
-
-  .header-sm.muted {
-    opacity: 0.5;
   }
 
   .loading {
@@ -501,7 +516,8 @@
   }
 
   .settings-modal select,
-  .settings-modal textarea {
+  .settings-modal textarea,
+  .settings-modal input {
     padding: 0.5rem;
     font-size: 0.9rem;
     font-weight: 400;
@@ -517,11 +533,26 @@
     min-height: 120px;
   }
 
+  .corrections-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.85rem;
+    color: #6b7280;
+  }
+
+  .link-btn {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.8rem;
+    color: #2563eb;
+    border-color: #93c5fd;
+  }
+
   .messages {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    max-height: 70vh;
+    flex: 1;
     overflow-y: auto;
     padding: 0.5rem 0;
   }
@@ -616,17 +647,6 @@
     margin: 0.25rem 0 0;
   }
 
-  .header-sm.active-mode {
-    color: #059669;
-    border-color: #059669;
-  }
-
-  .transcription {
-    font-size: 0.75rem;
-    color: #9ca3af;
-    margin: 0.25rem 0 0;
-  }
-
   .edit-instruction {
     width: 100%;
     box-sizing: border-box;
@@ -712,24 +732,8 @@
     text-align: center;
   }
 
-  .ptt-button {
-    width: 100%;
-    padding: 1.5rem;
-    font-size: 1.1rem;
-    margin-bottom: 1rem;
-    user-select: none;
-    touch-action: none;
-  }
-
-  .ptt-button.ptt-active {
-    color: #059669;
-    border-color: #059669;
-    background: #ecfdf5;
-  }
-
   /* Voice log */
   .voice-log-section {
-    margin-top: 1rem;
     border-top: 1px solid #e5e7eb;
     padding-top: 0.5rem;
   }
@@ -776,5 +780,73 @@
 
   .voice-text {
     color: #6b7280;
+  }
+
+  /* Mic orb */
+  .mic-area {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1.5rem 0;
+  }
+
+  .mode-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #9ca3af;
+  }
+
+  .mic-orb {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    border: none;
+    background: #e5e7eb;
+    color: #6b7280;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .mic-orb:disabled {
+    cursor: default;
+  }
+
+  .mic-orb.connecting {
+    animation: gentle-pulse 1.5s ease-in-out infinite;
+  }
+
+  .mic-orb.connected {
+    background: #059669;
+    color: white;
+  }
+
+  .mic-orb.connected::before,
+  .mic-orb.connected::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid #059669;
+    animation: pulse-ring 2s ease-out infinite;
+  }
+
+  .mic-orb.connected::after {
+    animation-delay: 1s;
+  }
+
+  @keyframes pulse-ring {
+    0% { transform: scale(1); opacity: 0.5; }
+    100% { transform: scale(2.2); opacity: 0; }
+  }
+
+  @keyframes gentle-pulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
   }
 </style>

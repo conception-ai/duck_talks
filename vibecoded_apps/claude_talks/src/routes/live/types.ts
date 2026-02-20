@@ -105,8 +105,6 @@ export interface AudioPort {
 
 export interface RealtimeInput {
   audio?: { data: string; mimeType: string };
-  activityStart?: Record<string, never>;
-  activityEnd?: Record<string, never>;
 }
 
 export interface ContentPart {
