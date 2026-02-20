@@ -10,19 +10,20 @@ Your code must be clean, minimalist and easy to read.
 | @models.py | Session JSONL schema |
 | @watcher.py | File monitor |
 | @claude_client.py | Claude Code SDK wrapper (isolated subprocess) |
-| @api/server.py | FastAPI backend — SSE streaming + sentence buffering |
+| @api/server.py | FastAPI backend — SSE streaming + sentence buffering + `GET /api/sessions/{id}/messages` (faithful content blocks) + `POST /api/sessions/{id}/back` (rewind) |
 | @vibecoded_apps/CLAUDE.md | Svelte app conventions |
-| @vibecoded_apps/claude_talks/src/routes/live/+page.svelte | Gemini Live — browser client (DI wiring + thin render) |
-| @vibecoded_apps/claude_talks/src/routes/live/types.ts | Port interfaces (DataStoreMethods, AudioPort, LiveBackend, ConverseApi, RealtimeInput) + `InteractionMode` (`'direct' \| 'review' \| 'correct'`) + correction types (STTCorrection, PendingApproval with `instruction`, optional `rawInstruction`, `audioChunks`) |
-| @vibecoded_apps/claude_talks/src/routes/live/stores/data.svelte.ts | Data store — reactive state + session lifecycle + audio buffer + approval flow |
+| @vibecoded_apps/claude_talks/src/routes/home/+page.svelte | Home page — session list, fetches `GET /api/sessions`, navigates to `/live/:id` |
+| @vibecoded_apps/claude_talks/src/App.svelte | Router — `/` → HomePage, `/live` → LivePage (blank), `/live/:id` → LivePage (with loaded session) |
+| @vibecoded_apps/claude_talks/src/routes/live/+page.svelte | Gemini Live — accepts route `params.id`, loads history on mount, renders `messages[]` (CC conversation) + `voiceLog[]` (ephemeral) + pending overlays |
+| @vibecoded_apps/claude_talks/src/routes/live/types.ts | Port interfaces (DataStoreMethods with `back()`, AudioPort, LiveBackend, ConverseApi with `abort()`, RealtimeInput) + CC message types (`ContentBlock`, `Message`, `VoiceEvent`) + `InteractionMode` (`'direct' \| 'review' \| 'correct'`) + correction types (STTCorrection, PendingApproval) |
+| @vibecoded_apps/claude_talks/src/routes/live/stores/data.svelte.ts | Data store — two-array model: `messages[]` (CC conversation, mutable) + `voiceLog[]` (ephemeral, append-only). `loadHistory()`, `back()`, session lifecycle, audio buffer, approval flow |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/ui.svelte.ts | UI store — persistent user prefs (voiceEnabled, apiKey, mode: InteractionMode, pttMode). `cycleMode()` rotates direct → review → correct. Migrates old `learningMode: boolean` on load |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/corrections.svelte.ts | Corrections store — localStorage-persisted STT corrections |
 | @vibecoded_apps/claude_talks/src/routes/live/recorder.ts | Mic audio recorder — RecordedChunk type (reused for audio buffer) |
 | @vibecoded_apps/claude_talks/src/routes/live/gemini.ts | Gemini Live connection + message handling. 3-way mode branching (direct/review/correct) in tool call handler. No correction logic in Gemini layer — corrections are handled externally via `correctInstruction` dep |
 | @vibecoded_apps/claude_talks/src/routes/live/correct.ts | Stateless LLM auto-correction — `correctInstruction(llm, instruction, corrections)`. Text-only today, planned: multimodal with audio (see `roadmap/todos/correction_llm_accuracy.md`) |
-| @vibecoded_apps/claude_talks/src/routes/live/converse.ts | SSE stream consumer for /api/converse |
+| @vibecoded_apps/claude_talks/src/routes/live/converse.ts | SSE stream consumer for /api/converse. Has `AbortController` + `abort()` method for cancelling in-flight streams (used by `back()`) |
 | @vibecoded_apps/claude_talks/src/routes/live/audio.ts | Browser audio I/O |
-| @vibecoded_apps/claude_talks/src/routes/live/models.ts | Shared types (SessionInfo) |
 | @vibecoded_apps/claude_talks/src/routes/live/tools.ts | Gemini function declarations (`accept_instruction`, `converse`) + handlers |
 | @vibecoded_apps/claude_talks/src/lib/llm.ts | LLM abstraction — `createLLM({ apiKey })` → callable with `.stream()`, `.json<T>()`. Supports multimodal: `Message.content` accepts `string` or `Part[]` (text + `inlineData` for audio/images) |
 | @vibecoded_apps/claude_talks/src/lib/stt.ts | Pure audio utilities — `combineChunks` (merge base64 PCM), `chunksToWav` (PCM → WAV). No LLM dependency |
@@ -39,6 +40,18 @@ Your code must be clean, minimalist and easy to read.
 
 ## Gotchas
 
+- **Two-array data model** (`data.svelte.ts`): The old `turns: Turn[]` is gone. State is split into two arrays with different lifecycles:
+  - `messages: Message[]` — CC conversation only. Persistent (loaded from backend, appended during converse, truncated on "back"). 1:1 with `models.py` content blocks. `commitTurn()` routes converse tool results here.
+  - `voiceLog: VoiceEvent[]` — user speech + Gemini speech + errors. Append-only, session-local, lost on page reload. `commitTurn()` routes `pendingInput`/`pendingOutput` here. `pushError()` also goes here.
+  - **Why**: "go back" pops from `messages[]` but leaves `voiceLog[]` untouched. Can't do this cleanly with one interleaved array.
+  - `snapshotUtterance()` now reads from `voiceLog[]` (not turns).
+- **Message quality levels**: `messages[]` has two fidelity levels depending on source:
+  - **Loaded from backend** (`GET /api/sessions/{id}/messages`): full content blocks — `text`, `thinking`, `tool_use`, `tool_result`, `image`.
+  - **Appended during live session** (from SSE stream): degraded — only `[{ type: 'text', text: flatText }]`. The SSE endpoint returns `{text: "..."}` chunks, not structured blocks.
+  - Both render fine. When user navigates away and returns, history reload gives full fidelity.
+- **`walk_path()` returns leaf-to-root order**: `Conversation.walk_path(leaf_uuid)` returns `[leaf, ..., root]`. Must `.reverse()` for display. The backend `GET /messages` endpoint handles this.
+- **Backend serialization — no wrapper model**: `AssistantEntry.message.content` is `list[ContentBlock]` (pydantic models). Just call `.model_dump(exclude_none=True)` on each block — naturally produces the right JSON. `UserEntry.message.content` (`str | list[JsonDict]`) returned as-is.
+- **`back()` abort race condition** (`data.svelte.ts`): `api.abort()` is sync but the AbortError fires on the next microtask. The error callback in `gemini.ts` calls `finishTool()` which could commit partial results. Solution: `back()` clears `pendingTool = null` BEFORE the await, so `finishTool()` short-circuits when the async error arrives.
 - **Gemini Live**: use `types.LiveConnectConfig` + `types.Modality.AUDIO` (not raw dicts). `model_turn.parts` can be `None`. File input needs chunking + `audio_stream_end=True`.
 - **Audio format split**: Gemini Live (`sendRealtimeInput`) accepts raw PCM (`audio/pcm;rate=16000`). `generateContent` does NOT — it needs a proper container format (WAV, MP3, etc.). Use `chunksToWav()` from `stt.ts` to wrap PCM before passing to `llm()`. Confirmed by experiment: raw PCM → hallucinated output; WAV → correct transcription.
 - **Two injection channels** (`gemini.ts`): A Gemini Live session has two ways to send data — they can be used simultaneously on the same session.
@@ -100,7 +113,7 @@ The agent is a **vanilla test executor** — it does exactly what you tell it an
 
 **Rules for launching:**
 1. **Start both servers first** (Bash, background) before launching the agent.
-2. **Tell it the URL** — always `http://localhost:5173/#/live`.
+2. **Tell it the URL** — `http://localhost:5000/` (home) or `http://localhost:5000/#/live` (live page).
 3. **Tell it what to look for** — element text, button labels, console log patterns. Be literal.
 4. **Tell it what success looks like** — "page shows buttons: Start, Record, Replay", "console has no errors", "a message bubble appears with text".
 5. **Don't assume context** — the agent doesn't know the app. Describe UI elements by visible text/role, not by component names.
@@ -112,7 +125,7 @@ The agent is a **vanilla test executor** — it does exactly what you tell it an
 ```bash
 # Check if already running
 curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs  # backend
-curl -s -o /dev/null -w "%{http_code}" http://localhost:5173       # frontend
+curl -s -o /dev/null -w "%{http_code}" http://localhost:5000       # frontend
 ```
 
 Only start what returned non-200:
@@ -120,7 +133,7 @@ Only start what returned non-200:
 # Backend (must run from project root)
 cd /Users/dhuynh95/claude_talks && source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000 --reload
 # Frontend
-cd /Users/dhuynh95/claude_talks/vibecoded_apps/claude_talks && npx vite --port 5173
+cd /Users/dhuynh95/claude_talks/vibecoded_apps/claude_talks && npm run dev
 ```
 
 ### Backend testing
@@ -148,11 +161,14 @@ Or use **Chrome MCP** `evaluate_script` with `fetch()` — browser stdout works 
 
 ### Standard E2E scenarios
 
-**Smoke test** (page loads):
-> Navigate to `http://localhost:5173/#/live`. Take a snapshot. Verify buttons with text "Start", "Record", "Replay" are visible. Check console for errors (`list_console_messages`). Report pass/fail.
+**Home page** (session list):
+> Navigate to `http://localhost:5000/`. Take a screenshot. Verify: "Sessions" heading, "New" button, session rows with names + message counts + relative times. Click first session → URL changes to `/#/live/<id>`, messages render with YOU/CLAUDE labels. Click "Home" → back to session list.
+
+**Smoke test** (live page loads):
+> Navigate to `http://localhost:5000/#/live`. Take a snapshot. Verify buttons with text "Start", "Record", "Replay" are visible. Check console for errors (`list_console_messages`). Report pass/fail.
 
 **Converse pipeline** (full E2E):
-> Navigate to `http://localhost:5173/#/live`. Take a snapshot. Click the button labeled `converse_closure_question` (a saved recording). Wait 15 seconds for the replay to complete. Take a snapshot. Verify that message bubbles appeared in the conversation area. Check console for errors — ignore "mic" warnings. Report pass/fail.
+> Navigate to `http://localhost:5000/#/live`. Take a snapshot. Click the button labeled `converse_closure_question` (a saved recording). Wait 15 seconds for the replay to complete. Take a snapshot. Verify that message bubbles appeared in the conversation area. Check console for errors — ignore "mic" warnings. Report pass/fail.
 
 - Saved recordings: `vibecoded_apps/claude_talks/public/recordings/` — `.json` files that can be replayed in the UI to test the full E2E pipeline without a mic
 ## Instructions

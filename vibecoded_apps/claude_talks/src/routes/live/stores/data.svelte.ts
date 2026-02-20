@@ -1,7 +1,11 @@
 /**
  * Core application data store.
- * Owns both reactive state (turns, status) and session lifecycle.
+ * Owns both reactive state (messages, voiceLog, status) and session lifecycle.
  * Takes swappable ports (audio, API) as constructor args.
+ *
+ * Two separate arrays with different lifecycles:
+ * - messages: Message[]   — CC conversation (persistent, mutable, 1:1 with JSONL)
+ * - voiceLog: VoiceEvent[] — user/Gemini speech (ephemeral, append-only)
  */
 
 import { connectGemini } from '../gemini';
@@ -14,10 +18,11 @@ import type {
   ConverseApi,
   InteractionMode,
   LiveBackend,
+  Message,
   PendingApproval,
   PendingTool,
   Status,
-  Turn,
+  VoiceEvent,
 } from '../types';
 
 interface DataStoreDeps {
@@ -34,7 +39,8 @@ export function createDataStore(deps: DataStoreDeps) {
 
   // --- Reactive state ---
   let status = $state<Status>('idle');
-  let turns = $state<Turn[]>([]);
+  let messages = $state<Message[]>([]);
+  let voiceLog = $state<VoiceEvent[]>([]);
   let pendingInput = $state('');
   let pendingOutput = $state('');
   let pendingTool = $state<PendingTool | null>(null);
@@ -86,15 +92,15 @@ export function createDataStore(deps: DataStoreDeps) {
   }
 
   function commitTurn() {
-    // Always flush user input
+    // Flush user speech → voiceLog (append-only, never rewound)
     const userText = pendingInput.trim();
     if (userText) {
-      // Merge into last user turn if consecutive (VAD fires multiple interrupts per utterance)
-      const last = turns.at(-1);
+      // Merge into last voice event if consecutive user speech (VAD fires multiple interrupts)
+      const last = voiceLog.at(-1);
       if (last?.role === 'user') {
         last.text = (last.text + ' ' + userText).trim();
       } else {
-        turns.push({ role: 'user', text: userText });
+        voiceLog.push({ role: 'user', text: userText, ts: Date.now() });
       }
     }
     pendingInput = '';
@@ -118,17 +124,36 @@ export function createDataStore(deps: DataStoreDeps) {
       return;
     }
 
-    // Merge into last assistant turn if consecutive speech (no tool on either)
-    const last = turns.at(-1);
-    if (last?.role === 'assistant' && !last.toolCall && !tool && text) {
-      last.text = (last.text + '\n' + text).trim();
-    } else {
-      const turn: Turn = { role: 'assistant', text };
-      if (tool) {
-        turn.toolCall = { name: tool.name, args: tool.args };
-        turn.toolResult = tool.text;
+    // Gemini speech (without tool) → voiceLog
+    if (text && !tool) {
+      const last = voiceLog.at(-1);
+      if (last?.role === 'gemini') {
+        last.text = (last.text + '\n' + text).trim();
+      } else {
+        voiceLog.push({ role: 'gemini', text, ts: Date.now() });
       }
-      turns.push(turn);
+    }
+
+    // Converse tool result → messages[] (CC conversation)
+    if (tool) {
+      // Gemini speech alongside tool → voiceLog
+      if (text) {
+        voiceLog.push({ role: 'gemini', text, ts: Date.now() });
+      }
+      // User instruction that was sent to Claude
+      if (tool.name === 'converse' && tool.args.instruction) {
+        messages.push({
+          role: 'user',
+          content: String(tool.args.instruction),
+        });
+      }
+      // Claude's response (degraded: text-only during live streaming)
+      if (tool.text) {
+        messages.push({
+          role: 'assistant',
+          content: [{ type: 'text', text: tool.text }],
+        });
+      }
     }
 
     pendingOutput = '';
@@ -136,7 +161,7 @@ export function createDataStore(deps: DataStoreDeps) {
   }
 
   function pushError(text: string) {
-    turns.push({ role: 'assistant', text });
+    voiceLog.push({ role: 'gemini', text, ts: Date.now() });
   }
 
   function setStatus(s: Status) {
@@ -145,8 +170,8 @@ export function createDataStore(deps: DataStoreDeps) {
 
   function snapshotUtterance() {
     let prior = '';
-    for (let i = turns.length - 1; i >= 0; i--) {
-      if (turns[i].role === 'user') { prior = turns[i].text; break; }
+    for (let i = voiceLog.length - 1; i >= 0; i--) {
+      if (voiceLog[i].role === 'user') { prior = voiceLog[i].text; break; }
     }
     const full = prior
       ? (prior + ' ' + pendingInput).trim()
@@ -182,6 +207,36 @@ export function createDataStore(deps: DataStoreDeps) {
     finishTool();
   }
 
+  function loadHistory(msgs: Message[], sessionId: string) {
+    messages = msgs;
+    api.sessionId = sessionId;
+  }
+
+  async function back() {
+    const sid = api.sessionId;
+    if (!sid) return;
+
+    // Abort in-flight converse stream
+    api.abort();
+
+    // Clear all pending state FIRST — prevents finishTool() from
+    // committing partial results when the async abort error fires
+    pendingTool = null;
+    pendingOutput = '';
+    pendingApproval = null;
+    pendingCancel?.();
+    pendingCancel = null;
+    pendingExecute = null;
+
+    // Persist rewind to backend
+    const res = await fetch(`/api/sessions/${sid}/back`, { method: 'POST' });
+    if (!res.ok) return;
+
+    // Pop last round from messages[]
+    while (messages.length && messages.at(-1)?.role === 'assistant') messages.pop();
+    while (messages.length && messages.at(-1)?.role === 'user') messages.pop();
+  }
+
   const dataMethods = {
     appendInput,
     appendOutput,
@@ -194,6 +249,7 @@ export function createDataStore(deps: DataStoreDeps) {
     snapshotUtterance,
     holdForApproval,
     approve,
+    back,
   };
 
   // --- Lifecycle: Live mode ---
@@ -346,7 +402,8 @@ export function createDataStore(deps: DataStoreDeps) {
 
   return {
     get status() { return status; },
-    get turns() { return turns; },
+    get messages() { return messages; },
+    get voiceLog() { return voiceLog; },
     get pendingInput() { return pendingInput; },
     get pendingOutput() { return pendingOutput; },
     get pendingTool() { return pendingTool; },
@@ -354,6 +411,8 @@ export function createDataStore(deps: DataStoreDeps) {
     get pttActive() { return pttActive; },
     get claudeSessionId() { return api.sessionId; },
     setClaudeSession(id: string | null) { api.sessionId = id; },
+    loadHistory,
+    back,
     approve,
     reject,
     start,

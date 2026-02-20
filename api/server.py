@@ -4,9 +4,9 @@ import asyncio
 import glob
 import json
 import logging
-import os
 import re
 from pathlib import Path
+from typing import cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -39,15 +39,35 @@ class SessionInfo(BaseModel):
     message_count: int
 
 
+def _last_timestamp(path: str) -> str:
+    """Read last 8KB of a JSONL file, return the most recent entry timestamp."""
+    with open(path, "rb") as f:
+        _ = f.seek(0, 2)
+        size = f.tell()
+        chunk = min(8192, size)
+        _ = f.seek(-chunk, 2)
+        tail = f.read().decode(errors="replace")
+    for line in reversed(tail.strip().split("\n")):
+        try:
+            data: dict[str, object] = cast(dict[str, object], json.loads(line))
+            ts = str(data.get("timestamp", ""))
+            if ts:
+                return ts
+        except (json.JSONDecodeError, AttributeError):
+            continue
+    return ""
+
+
 @app.get("/api/sessions")
 def list_sessions() -> list[SessionInfo]:
     if not _PROJECT_DIR.is_dir():
         return []
-    files = sorted(
-        glob.glob(str(_PROJECT_DIR / "*.jsonl")),
-        key=os.path.getmtime,
-        reverse=True,
-    )
+    files = glob.glob(str(_PROJECT_DIR / "*.jsonl"))
+
+    # Fast sort: tail 8KB per file for timestamp (8ms vs 377ms full parse)
+    timestamps = {f: _last_timestamp(f) for f in files}
+    files.sort(key=lambda f: timestamps[f], reverse=True)
+
     sessions: list[SessionInfo] = []
     for f in files:
         sid = Path(f).stem
@@ -65,7 +85,7 @@ def list_sessions() -> list[SessionInfo]:
                 summary=conv.description,
                 last_user_message=conv.last_user_message,
                 last_assistant_message=conv.last_assistant_message,
-                updated_at=conv.updated_at,
+                updated_at=timestamps[f],
                 message_count=conv.message_count,
             )
         )
@@ -146,6 +166,39 @@ def get_path(
         )
         for e in path
     ]
+
+
+class MessageResponse(BaseModel):
+    role: str
+    content: str | list[dict[str, object]]
+
+
+@app.get("/api/sessions/{session_id}/messages")
+def get_messages(session_id: str) -> list[MessageResponse]:
+    """Return the active-path messages with faithful content blocks."""
+    conv = _load_conversation(session_id)
+    active = conv.active_leaf
+    if not active:
+        raise HTTPException(404, "No active leaf found")
+
+    path = conv.walk_path(active.uuid)
+    path.reverse()  # walk_path returns leaf→root, we want root→leaf
+
+    messages: list[MessageResponse] = []
+    for entry in path:
+        if isinstance(entry, UserEntry):
+            messages.append(
+                MessageResponse(
+                    role="user",
+                    content=entry.message.content,
+                )
+            )
+        elif isinstance(entry, AssistantEntry):
+            blocks: list[dict[str, object]] = [
+                block.model_dump(exclude_none=True) for block in entry.message.content
+            ]
+            messages.append(MessageResponse(role="assistant", content=blocks))
+    return messages
 
 
 # Sentence-ending punctuation followed by space/newline, or standalone newline

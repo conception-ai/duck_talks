@@ -28,6 +28,26 @@ export interface Turn {
 
 export type Status = 'idle' | 'connecting' | 'connected' | 'recording';
 
+// --- CC message types (1:1 with models.py) ---
+
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string | ContentBlock[];
+}
+
+export interface VoiceEvent {
+  role: 'user' | 'gemini';
+  text: string;
+  ts: number;
+}
+
 // --- Corrections ---
 
 export interface STTCorrection {
@@ -70,6 +90,7 @@ export interface DataStoreMethods {
     cancel?: () => void,
   ): void;
   approve(editedText?: string): void;
+  back(): Promise<void>;
 }
 
 // --- Port: Audio ---
@@ -124,4 +145,5 @@ export interface ConverseApi {
       onError: (msg: string) => void;
     },
   ): Promise<void>;
+  abort(): void;
 }

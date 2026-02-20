@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { push } from 'svelte-spa-router';
   import { createDataStore } from './stores/data.svelte';
   import { createUIStore } from './stores/ui.svelte';
   import { createCorrectionsStore } from './stores/corrections.svelte';
@@ -7,7 +8,9 @@
   import { correctInstruction } from './correct';
   import { createLLM } from '../../lib/llm';
   import type { Recording } from './recorder';
-  import type { AudioSink, STTCorrection } from './types';
+  import type { AudioSink, ContentBlock, Message, STTCorrection } from './types';
+
+  let { params } = $props<{ params?: { id?: string } }>();
 
   const ui = createUIStore();
   const corrections = createCorrectionsStore();
@@ -35,10 +38,61 @@
     getPttMode: () => ui.pttMode,
   });
 
+  // Load session history if route has an ID
+  let historyLoading = $state(false);
+  if (params?.id) {
+    historyLoading = true;
+    fetch(`/api/sessions/${params.id}/messages`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`${res.status}`);
+        return res.json();
+      })
+      .then((msgs: Message[]) => {
+        live.loadHistory(msgs, params!.id!);
+      })
+      .catch((e) => {
+        console.error('[live] failed to load history:', e);
+      })
+      .finally(() => {
+        historyLoading = false;
+      });
+  }
+
+  // --- Helper: extract text from a message for display ---
+  function messageText(msg: Message): string {
+    if (typeof msg.content === 'string') return msg.content;
+    return msg.content
+      .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n');
+  }
+
+  function messageToolUses(msg: Message): Extract<ContentBlock, { type: 'tool_use' }>[] {
+    if (typeof msg.content === 'string') return [];
+    return msg.content.filter(
+      (b): b is Extract<ContentBlock, { type: 'tool_use' }> => b.type === 'tool_use',
+    );
+  }
+
+  function messageToolResults(msg: Message): Extract<ContentBlock, { type: 'tool_result' }>[] {
+    if (typeof msg.content === 'string') return [];
+    return msg.content.filter(
+      (b): b is Extract<ContentBlock, { type: 'tool_result' }> => b.type === 'tool_result',
+    );
+  }
+
+  function messageThinking(msg: Message): string[] {
+    if (typeof msg.content === 'string') return [];
+    return msg.content
+      .filter((b): b is Extract<ContentBlock, { type: 'thinking' }> => b.type === 'thinking')
+      .map((b) => b.thinking);
+  }
+
   let keyDraft = $state(ui.apiKey ?? '');
   let correctionsModalOpen = $state(false);
   let playingId = $state<string | null>(null);
   let stopPlaying: (() => void) | null = null;
+  let showVoiceLog = $state(false);
 
   function playCorrection(c: STTCorrection) {
     stopPlaying?.();
@@ -138,6 +192,7 @@
 
 <main>
   <header>
+    <button class="header-sm" onclick={() => push('/')}>Home</button>
     <h1>Gemini Live</h1>
     <button class="header-sm" onclick={() => { keyDraft = ui.apiKey ?? ''; ui.openApiKeyModal(); }}>API Key</button>
     <button class="header-sm" class:muted={!ui.voiceEnabled} onclick={ui.toggleVoice}>
@@ -181,25 +236,42 @@
     </button>
   {/if}
 
+  {#if historyLoading}
+    <p class="loading">Loading conversation...</p>
+  {/if}
+
+  <!-- CC Messages (persistent conversation) -->
   <div class="messages">
-    {#each live.turns as turn}
-      <div class="msg {turn.role}">
-        <span class="label">{turn.role === 'user' ? 'You' : 'Gemini'}</span>
-        {#if turn.text}<p>{turn.text}</p>{/if}
-        {#if turn.toolCall}
+    {#each live.messages as msg}
+      <div class="msg {msg.role}">
+        <span class="label">{msg.role === 'user' ? 'You' : 'Claude'}</span>
+        {#if messageText(msg)}<p>{messageText(msg)}</p>{/if}
+        {#each messageThinking(msg) as think}
+          <details class="thinking">
+            <summary>Thinking...</summary>
+            <p>{think}</p>
+          </details>
+        {/each}
+        {#each messageToolUses(msg) as tool}
           <div class="tool-result">
-            <span class="tool-pill">{turn.toolCall.name}</span>
-            {#if turn.toolCall.args.instruction}
-              <p class="tool-args">{turn.toolCall.args.instruction}</p>
-            {:else if Object.keys(turn.toolCall.args).length}
-              <p class="tool-args">{JSON.stringify(turn.toolCall.args)}</p>
+            <span class="tool-pill">{tool.name}</span>
+            {#if tool.input.instruction}
+              <p class="tool-args">{tool.input.instruction}</p>
+            {:else if Object.keys(tool.input).length}
+              <p class="tool-args">{JSON.stringify(tool.input)}</p>
             {/if}
-            {#if turn.toolResult}<p class="tool-text">{turn.toolResult}</p>{/if}
           </div>
-        {/if}
+        {/each}
+        {#each messageToolResults(msg) as result}
+          <details class="tool-result">
+            <summary>Tool result</summary>
+            <p class="tool-text">{result.content}</p>
+          </details>
+        {/each}
       </div>
     {/each}
 
+    <!-- Pending overlays (real-time streaming) -->
     {#if live.pendingInput}
       <div class="msg user pending">
         <span class="label">You</span>
@@ -251,6 +323,25 @@
       </div>
     {/if}
   </div>
+
+  <!-- Voice Log (ephemeral, collapsible) -->
+  {#if live.voiceLog.length}
+    <div class="voice-log-section">
+      <button class="voice-log-toggle" onclick={() => { showVoiceLog = !showVoiceLog; }}>
+        Voice Log ({live.voiceLog.length}) {showVoiceLog ? '\u25B2' : '\u25BC'}
+      </button>
+      {#if showVoiceLog}
+        <div class="voice-log">
+          {#each live.voiceLog as ev}
+            <div class="voice-ev {ev.role}">
+              <span class="voice-role">{ev.role === 'user' ? 'You' : 'Gemini'}</span>
+              <span class="voice-text">{ev.text}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
 </main>
 
 {#if ui.apiKeyModalOpen}
@@ -341,12 +432,17 @@
     font-size: 0.75rem;
   }
 
-  .header-sm:first-of-type {
+  .header-sm:nth-of-type(2) {
     margin-left: auto;
   }
 
   .header-sm.muted {
     opacity: 0.5;
+  }
+
+  .loading {
+    color: #9ca3af;
+    text-align: center;
   }
 
   .backdrop {
@@ -430,6 +526,23 @@
     font-weight: 600;
     text-transform: uppercase;
     opacity: 0.5;
+  }
+
+  .thinking {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: #9ca3af;
+  }
+
+  .thinking summary {
+    cursor: pointer;
+    font-style: italic;
+  }
+
+  .thinking p {
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
   }
 
   .tool-result {
@@ -591,5 +704,56 @@
     color: #059669;
     border-color: #059669;
     background: #ecfdf5;
+  }
+
+  /* Voice log */
+  .voice-log-section {
+    margin-top: 1rem;
+    border-top: 1px solid #e5e7eb;
+    padding-top: 0.5rem;
+  }
+
+  .voice-log-toggle {
+    font-size: 0.75rem;
+    padding: 0.3rem 0.8rem;
+    color: #9ca3af;
+    border-color: #e5e7eb;
+    width: 100%;
+  }
+
+  .voice-log {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .voice-ev {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+  }
+
+  .voice-ev.user {
+    background: #f9fafb;
+    text-align: right;
+  }
+
+  .voice-ev.gemini {
+    background: #f0f9ff;
+  }
+
+  .voice-role {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    opacity: 0.5;
+    margin-right: 0.5rem;
+  }
+
+  .voice-text {
+    color: #6b7280;
   }
 </style>
