@@ -5,8 +5,6 @@
     id: string;
     name: string;
     summary: string;
-    last_user_message: string;
-    last_assistant_message: string;
     updated_at: string;
     message_count: number;
   }
@@ -60,8 +58,8 @@
             <span class="session-name">{s.name}</span>
             <span class="session-meta">{s.message_count} msgs &middot; {relativeTime(s.updated_at)}</span>
           </div>
-          {#if s.last_user_message}
-            <p class="session-summary">{s.last_user_message}</p>
+          {#if s.summary}
+            <p class="session-summary">{s.summary}</p>
           {/if}
         </button>
       {/each}
