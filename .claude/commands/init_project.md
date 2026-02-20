@@ -40,11 +40,10 @@ Your code must be clean, minimalist and easy to read.
 
 ## Gotchas
 
-- **Two-array data model** (`data.svelte.ts`): The old `turns: Turn[]` is gone. State is split into two arrays with different lifecycles:
+- **Two-array data model** (`data.svelte.ts`): State is split into two arrays with different lifecycles:
   - `messages: Message[]` — CC conversation only. Persistent (loaded from backend, appended during converse, truncated on "back"). 1:1 with `models.py` content blocks. `commitTurn()` routes converse tool results here.
   - `voiceLog: VoiceEvent[]` — user speech + Gemini speech + errors. Append-only, session-local, lost on page reload. `commitTurn()` routes `pendingInput`/`pendingOutput` here. `pushError()` also goes here.
   - **Why**: "go back" pops from `messages[]` but leaves `voiceLog[]` untouched. Can't do this cleanly with one interleaved array.
-  - `snapshotUtterance()` now reads from `voiceLog[]` (not turns).
 - **Message quality levels**: `messages[]` has two fidelity levels depending on source:
   - **Loaded from backend** (`GET /api/sessions/{id}/messages`): full content blocks — `text`, `thinking`, `tool_use`, `tool_result`, `image`.
   - **Appended during live session** (from SSE stream): degraded — only `[{ type: 'text', text: flatText }]`. The SSE endpoint returns `{text: "..."}` chunks, not structured blocks.
@@ -59,12 +58,8 @@ Your code must be clean, minimalist and easy to read.
   - `sendClientContent` — **structured context injection**. No VAD. Deterministic ordering. Model responds only if `turnComplete: true`. Use for: prefilling context, feeding Claude text back. Audio `inlineData` parts work here (undocumented but confirmed). `turnComplete: true` crashes if sent before any audio has flowed — use `turnComplete: false` for context prefilling.
   - Ordering is guaranteed *within* each channel but *not across* them. Already mixed in practice: mic streams via `sendRealtimeInput` while Claude chunks are injected via `sendClientContent`.
 - **`inputTranscription` / `outputTranscription`** — confusingly named. Both are **server-sent events** (Gemini pushes them to you). "input" = transcription of the **user's** mic audio (from `sendRealtimeInput`). "output" = transcription of **Gemini's own** spoken response.
-  - **Confirmed by experiment** (recording: `what_is_latest_commit.json`, phrase "What is the latest commit?" → transcribed as "What is the latest complete?"):
-    1. `sendClientContent` text context (turnComplete: false) → `inputTranscription` **unchanged**
-    2. `sendClientContent` audio `inlineData` (turnComplete: false) → `inputTranscription` **unchanged**
-    3. `sendClientContent` with `turnComplete: true` as the first message → **disconnects** ("Request contains an invalid argument."). Works fine mid-conversation. Use `turnComplete: false` for prefilling.
-  - **Inference from (1) and (2):** `inputTranscription` appears to be produced by a pipeline that does not read the model's context window. This is consistent with a separate ASR frontend, but we only observed the effect — we did not directly inspect Gemini's internal architecture.
-  - **Not tested:** whether the model's *reasoning* (tool call args, `outputTranscription`) improves with audio context even when `inputTranscription` stays wrong. The correction may still help layer 2 even if it can't fix layer 1.
+  - `inputTranscription` is produced by a separate ASR pipeline that does not read the model's context window. `sendClientContent` (text or audio) does not change it.
+  - `sendClientContent` with `turnComplete: true` as the first message → **disconnects** ("Request contains an invalid argument."). Use `turnComplete: false` for prefilling.
 - **Function calling**: `tools.ts` declares `TOOLS` (uses `Type` enum from SDK) + `handleToolCall()` (pure fetch). The `converse` tool is `NON_BLOCKING` + `SILENT` response — Gemini speaks an acknowledgment while Claude streams in the background. Chunks are fed back via `sendClientContent` so Gemini reads them aloud. The handler lives in `gemini.ts` (not `tools.ts`) because it needs the session ref.
 - **`accept_instruction` is a meta-tool** (`gemini.ts`): Unlike `converse`, it acts on existing state — it calls `data.approve()` to accept the pending converse instruction. Critical: it MUST skip `startTool()` (would overwrite the pending `converse` tool) and sends a plain blocking response. `approve()` is on both the public store surface (UI button) and `DataStoreMethods` port (voice tool) — same function, no divergence, race-safe (second call is a no-op via `if (!pendingApproval) return` guard).
 - **Converse phase gating** (`gemini.ts`): A `conversePhase` state machine (`idle` → `suppressing` → `relaying` → `idle`) gates both audio and text during converse. Key non-obvious timing: Gemini sends "Asking Claude" audio/text BEFORE the `toolCall` message arrives, so the ack naturally passes through while `conversePhase` is still `idle`. After the tool call, `suppressing` blocks Gemini's own audio + flushes the player. On first `sendClientContent` (Claude chunk), `relaying` re-enables audio (Gemini reads Claude aloud) but keeps blocking `outputTranscription` (the `[CLAUDE]:` echo is noise — Claude's text is already in `pendingTool.text` via `appendTool`). `holdForApproval` takes an optional `cancel` callback to reset the phase on reject.
@@ -77,11 +72,11 @@ Your code must be clean, minimalist and easy to read.
 - **SDK setup** (one-time): `npm install @anthropic-ai/claude-code --prefix ~/.claude-sdk/cli` then `CLAUDECODE= CLAUDE_CONFIG_DIR=~/.claude-sdk ~/.claude-sdk/cli/node_modules/.bin/claude login`
 - **SDK client lifetime**: `ClaudeSDKClient` goes stale after the first `receive_response()` — the second `query()` hangs forever. Use the standalone `query()` function instead, with `resume=session_id` (captured from `ResultMessage.session_id`) to maintain conversation across calls. Each call spawns a fresh subprocess but resumes the same session.
 - **SDK cwd constraint**: Setting `cwd` to a path inside `~/.claude/` causes the SDK subprocess to hang (observed, root cause unknown). This affects any project located under the Claude config directory, not just this one. Workaround: use a temp dir or a path outside `~/.claude/`.
-- **Interaction mode** (`ui.svelte.ts`): 3-way cycle button — `direct` → `review` → `correct`. Replaces old `learningMode: boolean`. Persisted in localStorage (`claude-talks:ui` as `mode`). Old `learningMode` values auto-migrate on load.
+- **Interaction mode** (`ui.svelte.ts`): 3-way cycle button — `direct` → `review` → `correct`. Persisted in localStorage (`claude-talks:ui` as `mode`).
   - **`direct`** — tool calls execute immediately, no approval UI.
   - **`review`** — single-stage approval: user sees instruction, Accept/Edit/Reject. If user edits, the diff is saved as a correction in `corrections.svelte.ts`. Acceptance can come from UI button OR Gemini's `accept_instruction` tool (voice).
   - **`correct`** — LLM auto-corrects instruction via `correct.ts`, then shows single-stage approval with the corrected text. `rawInstruction` on `PendingApproval` tracks the original for correction bookkeeping.
-  - **No correction logic in Gemini layer** — all three old mechanisms (system prompt injection, audio few-shot at session start, audio re-injection on approve) were stripped. `BASE_PROMPT` is used directly. Corrections are purely external via the stateless LLM call.
+  - No correction logic in Gemini layer — corrections are purely external via the stateless LLM call in `correct.ts`.
   - `snapshotUtterance()` must still be called BEFORE `commitTurn()` in `gemini.ts` — it captures audio buffer. `commitTurn()` clears `audioBuffer`.
   - Audio/text suppression during converse is handled by `conversePhase` in `gemini.ts` (not in the store). See **Converse phase gating** above.
   - Approval UI is in the pending tool bubble (not user turn bubble). Shows `pendingApproval.instruction` (corrected) when approval is active, falls back to `pendingTool.args.instruction` when streaming.
