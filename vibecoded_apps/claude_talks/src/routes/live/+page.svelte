@@ -121,7 +121,6 @@
   let correctionsOpen = $state(false);
   let playingId = $state<string | null>(null);
   let stopPlaying: (() => void) | null = null;
-  let showVoiceLog = $state(false);
 
   function playCorrection(c: STTCorrection) {
     stopPlaying?.();
@@ -197,7 +196,7 @@
 <main>
   <header>
     <button class="header-btn" onclick={() => push('/')}>Home</button>
-    <h1>Gemini Live</h1>
+    <h1>Claude</h1>
     <button class="header-btn" onclick={openSettings}>Settings</button>
   </header>
 
@@ -242,7 +241,7 @@
       </div>
     {/each}
 
-    <!-- Pending overlays (real-time streaming) -->
+    <!-- Pending: live transcription -->
     {#if live.pendingInput}
       <div class="msg user pending">
         <span class="label">You</span>
@@ -250,23 +249,12 @@
       </div>
     {/if}
 
+    <!-- Pending: Claude thinking / streaming / approval -->
     {#if live.pendingTool}
-      {@const showApproval = live.pendingApproval != null}
-      <div class="msg assistant" class:pending={!showApproval} class:approval={showApproval}>
-        <span class="label">Gemini</span>
-        {#if live.pendingOutput}<div class="markdown">{@html marked.parse(live.pendingOutput)}</div>{/if}
-        <div class="tool-result" class:streaming={!showApproval}>
-          <span class="tool-pill">{live.pendingTool.name}</span>
-          {#if showApproval}
-            <p class="tool-args">{live.pendingApproval.instruction}</p>
-          {:else if live.pendingTool.args?.instruction}
-            <p class="tool-args">{live.pendingTool.args.instruction}</p>
-          {:else if live.pendingTool.args && Object.keys(live.pendingTool.args).length}
-            <p class="tool-args">{JSON.stringify(live.pendingTool.args)}</p>
-          {/if}
-          {#if live.pendingTool.text}<div class="tool-text markdown">{@html marked.parse(live.pendingTool.text)}</div>{/if}
-        </div>
-        {#if showApproval}
+      {#if live.pendingApproval}
+        <div class="msg assistant approval">
+          <span class="label">Claude</span>
+          <p>{live.pendingApproval.instruction}</p>
           {#if editing}
             <textarea class="edit-instruction" bind:value={editDraft}></textarea>
             <div class="approval-actions">
@@ -285,34 +273,20 @@
               <button class="reject-btn" onclick={handleReject}>Reject</button>
             </div>
           {/if}
-        {/if}
-      </div>
-    {:else if live.pendingOutput}
-      <div class="msg assistant pending">
-        <span class="label">Gemini</span>
-        <div class="markdown">{@html marked.parse(live.pendingOutput)}</div>
-      </div>
-    {/if}
-  </div>
-
-  <!-- Voice Log (ephemeral, collapsible) -->
-  {#if live.voiceLog.length}
-    <div class="voice-log-section">
-      <button class="voice-log-toggle" onclick={() => { showVoiceLog = !showVoiceLog; }}>
-        Voice Log ({live.voiceLog.length}) {showVoiceLog ? '\u25B2' : '\u25BC'}
-      </button>
-      {#if showVoiceLog}
-        <div class="voice-log">
-          {#each live.voiceLog as ev}
-            <div class="voice-ev {ev.role}">
-              <span class="voice-role">{ev.role === 'user' ? 'You' : 'Gemini'}</span>
-              <span class="voice-text">{ev.text}</span>
-            </div>
-          {/each}
+        </div>
+      {:else if live.pendingTool.text}
+        <div class="msg assistant pending">
+          <span class="label">Claude</span>
+          <div class="markdown">{@html marked.parse(live.pendingTool.text)}</div>
+        </div>
+      {:else}
+        <div class="msg assistant pending">
+          <span class="label">Claude</span>
+          <p class="thinking-dots"><span></span><span></span><span></span></p>
         </div>
       {/if}
-    </div>
-  {/if}
+    {/if}
+  </div>
 
   <!-- Mic orb -->
   <div class="mic-area">
@@ -341,7 +315,7 @@
 
       <label>
         API Key
-        <input type="password" placeholder="Gemini API key" bind:value={keyDraft} />
+        <input type="password" placeholder="API key" bind:value={keyDraft} />
       </label>
 
       <label>
@@ -612,8 +586,12 @@
     border: 1px solid #e4d9fc;
   }
 
-  .tool-result.streaming {
-    border-style: dashed;
+  .tool-result {
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    border-radius: 0.375rem;
+    background: #f5f0ff;
+    border: 1px solid #e4d9fc;
   }
 
   .tool-pill {
@@ -645,7 +623,7 @@
     opacity: 0.6;
   }
 
-  .msg.user.approval {
+  .msg.approval {
     opacity: 1;
     border: 2px solid #059669;
   }
@@ -786,54 +764,27 @@
     text-align: center;
   }
 
-  /* Voice log */
-  .voice-log-section {
-    border-top: 1px solid #e5e7eb;
-    padding-top: 0.5rem;
-  }
-
-  .voice-log-toggle {
-    font-size: 0.75rem;
-    padding: 0.3rem 0.8rem;
-    color: #9ca3af;
-    border-color: #e5e7eb;
-    width: 100%;
-  }
-
-  .voice-log {
+  /* Thinking dots */
+  .thinking-dots {
     display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    margin-top: 0.5rem;
-    max-height: 200px;
-    overflow-y: auto;
+    gap: 0.3rem;
+    margin: 0.25rem 0 0;
   }
 
-  .voice-ev {
-    font-size: 0.8rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 0.25rem;
+  .thinking-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #9ca3af;
+    animation: dot-bounce 1.4s ease-in-out infinite;
   }
 
-  .voice-ev.user {
-    background: #f9fafb;
-    text-align: right;
-  }
+  .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
 
-  .voice-ev.gemini {
-    background: #f0f9ff;
-  }
-
-  .voice-role {
-    font-size: 0.65rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    opacity: 0.5;
-    margin-right: 0.5rem;
-  }
-
-  .voice-text {
-    color: #6b7280;
+  @keyframes dot-bounce {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
   }
 
   /* Mic orb */
