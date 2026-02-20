@@ -3,9 +3,12 @@
  * No runtime code — everything here is a type or interface.
  */
 
-import type { RecordedChunk } from './recorder';
-
 // --- Domain types ---
+
+export interface RecordedChunk {
+  ts: number;   // ms since session start
+  data: string; // base64 PCM
+}
 
 export interface ToolCall {
   name: string;
@@ -26,7 +29,7 @@ export interface Turn {
   toolResult?: string;
 }
 
-export type Status = 'idle' | 'connecting' | 'connected' | 'recording';
+export type Status = 'idle' | 'connecting' | 'connected';
 
 // --- CC message types (1:1 with models.py) ---
 

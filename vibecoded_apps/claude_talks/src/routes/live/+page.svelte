@@ -7,7 +7,6 @@
   import { createConverseApi } from './converse';
   import { correctInstruction } from './correct';
   import { createLLM } from '../../lib/llm';
-  import type { Recording } from './recorder';
   import type { AudioSink, ContentBlock, Message, STTCorrection } from './types';
 
   let { params } = $props<{ params?: { id?: string } }>();
@@ -159,35 +158,6 @@
     editing = false;
   }
 
-  let fileInput: HTMLInputElement;
-  let recordings = $state<string[]>([]);
-
-  async function loadRecordings() {
-    const res = await fetch('/recordings/index.json');
-    if (res.ok) recordings = await res.json();
-  }
-  loadRecordings();
-
-  async function handleReplay() {
-    fileInput.click();
-  }
-
-  async function onFileSelected(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    const recording: Recording = JSON.parse(text);
-    input.value = '';
-    live.startReplay(recording);
-  }
-
-  async function replayFile(name: string) {
-    const res = await fetch(`/recordings/${name}`);
-    if (!res.ok) return;
-    const recording: Recording = await res.json();
-    live.startReplay(recording);
-  }
 </script>
 
 <main>
@@ -212,16 +182,8 @@
     {/if}
     {#if live.status === 'idle'}
       <button onclick={live.start}>Start</button>
-      <button class="rec-btn" onclick={live.startRecording}>Record</button>
-      <button onclick={handleReplay}>Replay</button>
-      <input type="file" accept=".json" bind:this={fileInput} onchange={onFileSelected} hidden />
-      {#each recordings as name}
-        <button class="rec-file" onclick={() => replayFile(name)}>{name.replace('.json', '')}</button>
-      {/each}
     {:else if live.status === 'connecting'}
       <button disabled>Connecting...</button>
-    {:else if live.status === 'recording'}
-      <button class="rec-btn recording" onclick={live.stopRecording}>Stop Rec</button>
     {:else}
       <button onclick={live.stop}>Stop</button>
     {/if}
@@ -483,17 +445,6 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
-  }
-
-  .rec-file {
-    font-size: 0.75rem;
-    color: #2563eb;
-    border-color: #93c5fd;
-  }
-
-  .rec-btn.recording {
-    color: #dc2626;
-    border-color: #dc2626;
   }
 
   .messages {

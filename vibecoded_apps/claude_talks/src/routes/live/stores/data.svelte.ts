@@ -9,8 +9,6 @@
  */
 
 import { connectGemini } from '../gemini';
-import { createRecorder, type RecorderHandle, type Recording } from '../recorder';
-import type { RecordedChunk } from '../recorder';
 import type {
   AudioPort,
   AudioSink,
@@ -21,6 +19,7 @@ import type {
   Message,
   PendingApproval,
   PendingTool,
+  RecordedChunk,
   Status,
   VoiceEvent,
 } from '../types';
@@ -61,7 +60,6 @@ export function createDataStore(deps: DataStoreDeps) {
   let backend: LiveBackend | null = null;
   let mic: AudioSource | null = null;
   let player: AudioSink | null = null;
-  let recorder: RecorderHandle | null = null;
 
   // --- Mutation methods (passed to gemini.ts as DataStoreMethods) ---
 
@@ -303,83 +301,7 @@ export function createDataStore(deps: DataStoreDeps) {
     player = null;
     backend?.close();
     backend = null;
-    api.sessionId = null;
     status = 'idle';
-  }
-
-  // --- Lifecycle: Recording (mic only, no Gemini) ---
-
-  async function startRecording() {
-    recorder = createRecorder();
-    status = 'recording';
-    try {
-      mic = await audio.startMic((base64) => {
-        recorder?.feed(base64);
-      });
-    } catch (e: unknown) {
-      pushError(`Mic failed: ${e instanceof Error ? e.message : String(e)}`);
-      recorder = null;
-      status = 'idle';
-    }
-  }
-
-  function stopRecording() {
-    mic?.stop();
-    mic = null;
-    recorder?.download();
-    recorder = null;
-    status = 'idle';
-  }
-
-  // --- Lifecycle: Replay (Gemini + recorded chunks) ---
-
-  async function startReplay(recording: Recording) {
-    const apiKey = deps.getApiKey();
-    if (!apiKey) {
-      pushError('API key not set. Click "API Key" to configure.');
-      return;
-    }
-    sessionStart = Date.now();
-    audioBuffer = [];
-    player = audio.createPlayer();
-    backend = await connectGemini({
-      data: dataMethods,
-      player,
-      converseApi: api,
-      tag: 'replay',
-      apiKey,
-      getMode: deps.getMode,
-      correctInstruction: deps.correctInstruction,
-      pttMode: false,
-    });
-    if (!backend) return;
-
-    try {
-      console.log(`[replay] feeding ${recording.chunks.length} chunks`);
-      let prevTs = 0;
-      for (const chunk of recording.chunks) {
-        const delay = chunk.ts - prevTs;
-        if (delay > 0) await new Promise((r) => setTimeout(r, delay));
-        audioBuffer.push({ ts: chunk.ts, data: chunk.data });
-        backend.sendRealtimeInput({
-          audio: { data: chunk.data, mimeType: `audio/pcm;rate=${recording.sampleRate}` },
-        });
-        prevTs = chunk.ts;
-      }
-      // 2s silence so Gemini detects end-of-speech
-      const silenceBytes = recording.sampleRate * 2 * 2;
-      const silence = btoa(
-        String.fromCharCode(...new Uint8Array(silenceBytes)),
-      );
-      backend.sendRealtimeInput({
-        audio: { data: silence, mimeType: `audio/pcm;rate=${recording.sampleRate}` },
-      });
-      console.log('[replay] all chunks sent + 2s silence');
-    } catch (e: unknown) {
-      console.error('[replay] feed failed:', e);
-      pushError(`Replay failed: ${e instanceof Error ? e.message : String(e)}`);
-      status = 'idle';
-    }
   }
 
   // --- PTT lifecycle ---
@@ -415,9 +337,6 @@ export function createDataStore(deps: DataStoreDeps) {
     reject,
     start,
     stop,
-    startRecording,
-    stopRecording,
-    startReplay,
     pttPress,
     pttRelease,
   };

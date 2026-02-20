@@ -19,7 +19,6 @@ Your code must be clean, minimalist and easy to read.
 | @vibecoded_apps/claude_talks/src/routes/live/stores/data.svelte.ts | Data store — two-array model: `messages[]` (CC conversation, mutable) + `voiceLog[]` (ephemeral, append-only). `loadHistory()`, `back()`, session lifecycle, audio buffer, approval flow |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/ui.svelte.ts | UI store — persistent user prefs (voiceEnabled, apiKey, mode: InteractionMode, pttMode). `cycleMode()` rotates direct → review → correct. Migrates old `learningMode: boolean` on load |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/corrections.svelte.ts | Corrections store — localStorage-persisted STT corrections |
-| @vibecoded_apps/claude_talks/src/routes/live/recorder.ts | Mic audio recorder — RecordedChunk type (reused for audio buffer) |
 | @vibecoded_apps/claude_talks/src/routes/live/gemini.ts | Gemini Live connection + message handling. 3-way mode branching (direct/review/correct) in tool call handler. No correction logic in Gemini layer — corrections are handled externally via `correctInstruction` dep |
 | @vibecoded_apps/claude_talks/src/routes/live/correct.ts | Stateless LLM auto-correction — `correctInstruction(llm, instruction, corrections)`. Text-only today, planned: multimodal with audio (see `roadmap/todos/correction_llm_accuracy.md`) |
 | @vibecoded_apps/claude_talks/src/routes/live/converse.ts | SSE stream consumer for /api/converse. Has `AbortController` + `abort()` method for cancelling in-flight streams (used by `back()`) |
@@ -93,7 +92,6 @@ Your code must be clean, minimalist and easy to read.
   - **`sendRealtimeInput` widened** — `LiveBackend.sendRealtimeInput` takes a `RealtimeInput` object (`{ audio?, activityStart?, activityEnd? }`) matching the SDK shape. In `gemini.ts` it's a pure pass-through: `(input) => session.sendRealtimeInput(input)`. All audio call sites use `{ audio: { data, mimeType } }`.
   - **Mic gating** — mic runs continuously in both modes. One guard in the callback: `if (pttMode && !pttActive) return;`. This avoids re-initializing AudioContext/worklet on each press. `pttPress()` sets the flag + sends `activityStart`; `pttRelease()` clears it + sends `activityEnd`.
   - **`pttMode` is non-reactive in data store** — plain `let`, set once at `start()` from `deps.getPttMode()`. UI reads `ui.pttMode` directly (not from data store). `pttActive` IS reactive (`$state`) for UI button feedback.
-  - **Replay always uses VAD** — `startReplay()` passes `pttMode: false`. PTT doesn't apply to pre-recorded audio.
 
 ## Locations & commands
 
@@ -105,37 +103,6 @@ Your code must be clean, minimalist and easy to read.
 - Test (real): `curl -s -N -X POST http://localhost:8000/api/converse -H 'Content-Type: application/json' -d '{"instruction":"say hello"}'`
 
 ## Testing
-
-After making changes, verify with the E2E test using the `e2e-chrome-tester` agent.
-
-### How to use the E2E agent
-
-The agent is a **vanilla test executor** — it does exactly what you tell it and reports results. It has no project context. Your prompt must be **self-contained**: explicit start state, explicit steps, explicit success criteria.
-
-**Rules for launching:**
-1. **Start both servers first** (Bash, background) before launching the agent.
-2. **Tell it the URL** — `http://localhost:5000/` (home) or `http://localhost:5000/#/live` (live page).
-3. **Tell it what to look for** — element text, button labels, console log patterns. Be literal.
-4. **Tell it what success looks like** — "page shows buttons: Start, Record, Replay", "console has no errors", "a message bubble appears with text".
-5. **Don't assume context** — the agent doesn't know the app. Describe UI elements by visible text/role, not by component names.
-
-### Servers
-
-**Check first, don't restart blindly.** Curl both ports before starting anything. Only start what's missing. Never kill running servers — waste of tokens and time.
-
-```bash
-# Check if already running
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/docs  # backend
-curl -s -o /dev/null -w "%{http_code}" http://localhost:5000       # frontend
-```
-
-Only start what returned non-200:
-```bash
-# Backend (must run from project root)
-cd /Users/dhuynh95/claude_talks && source /Users/dhuynh95/.claude/venv/bin/activate && uvicorn api.server:app --port 8000 --reload
-# Frontend
-cd /Users/dhuynh95/claude_talks/vibecoded_apps/claude_talks && npm run dev
-```
 
 ### Backend testing
 
@@ -160,20 +127,9 @@ Or use **Chrome MCP** `evaluate_script` with `fetch()` — browser stdout works 
 
 **`uvicorn --reload` doesn't reload transitive imports.** If you change `claude_client.py` (or any module imported by `server.py`), you must kill and restart the server process. `--reload` only re-imports the entry module.
 
-### Standard E2E scenarios
+### E2E testing (Chrome MCP)
 
-**Home page** (session list):
-> Navigate to `http://localhost:5000/`. Take a screenshot. Verify: "Sessions" heading, "New" button, session rows with names + message counts + relative times. Click first session → URL changes to `/#/live/<id>`, messages render with YOU/CLAUDE labels. Click "Home" → back to session list.
-
-**Smoke test** (live page loads):
-> Navigate to `http://localhost:5000/#/live`. Take a snapshot. Verify buttons with text "Start", "Record", "Replay" are visible. Check console for errors (`list_console_messages`). Report pass/fail.
-
-**Converse pipeline** (full E2E):
-> Navigate to `http://localhost:5000/#/live`. Take a snapshot. Click the button labeled `converse_closure_question` (a saved recording). Wait 15 seconds for the replay to complete. Take a snapshot. Verify that message bubbles appeared in the conversation area. Check console for errors — ignore "mic" warnings. Report pass/fail.
-
-- Saved recordings: `vibecoded_apps/claude_talks/public/recordings/` — `.json` files that can be replayed in the UI to test the full E2E pipeline without a mic
-
-**Programmatic audio injection** (Chrome MCP, no mic needed):
+**Programmatic audio injection** — no mic needed, no saved recordings:
 > Uses `getUserMedia` override + TTS to inject synthetic speech. No production code changes.
 > 1. `navigate_page` to `http://localhost:5000/#/live` with `initScript` that overrides `getUserMedia` and exposes `window.__injectAudio(base64pcm, sampleRate)`. See plan `eventual-roaming-scroll.md` for the full initScript.
 > 2. Click Start (VAD mode). Wait for `[live] connected` in console.
