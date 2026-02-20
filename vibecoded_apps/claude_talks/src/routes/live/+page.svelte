@@ -298,6 +298,11 @@
     {/if}
   </div>
 
+  <!-- Toast -->
+  {#if live.toast}
+    <div class="toast">{live.toast}</div>
+  {/if}
+
   <!-- Mic orb -->
   <div class="mic-area">
     <span class="mode-label">{MODE_LABELS[ui.mode]}</span>
@@ -775,6 +780,34 @@
     color: #9ca3af;
     font-size: 0.85rem;
     text-align: center;
+  }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    max-width: 360px;
+    padding: 0.6rem 1rem;
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+    border-radius: 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    animation: toast-in 0.2s ease-out;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    z-index: 200;
+  }
+
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(-0.5rem); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   /* Thinking dots */

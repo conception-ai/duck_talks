@@ -227,13 +227,14 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
                     chunk.cost_usd,
                     chunk.duration_ms,
                 )
-                yield _sse(
-                    {
-                        "done": True,
-                        "session_id": chunk.session_id,
-                        "cost_usd": chunk.cost_usd,
-                        "duration_ms": chunk.duration_ms,
-                    }
-                )
+                event: dict[str, object] = {
+                    "done": True,
+                    "session_id": chunk.session_id,
+                    "cost_usd": chunk.cost_usd,
+                    "duration_ms": chunk.duration_ms,
+                }
+                if chunk.error:
+                    event["error"] = chunk.error
+                yield _sse(event)
 
     return StreamingResponse(stream(), media_type="text/event-stream")

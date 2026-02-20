@@ -35,6 +35,7 @@ class Result:
     session_id: str
     cost_usd: float | None
     duration_ms: int
+    error: str | None = None
 
 
 type Chunk = TextDelta | Result
@@ -89,14 +90,17 @@ class Claude:
                 if text := delta.get("text"):
                     yield TextDelta(text=text)
             elif isinstance(msg, ResultMessage):
+                error = msg.result if msg.is_error else None
                 log.info(
-                    "result: session=%s, cost=$%s, %dms",
+                    "result: session=%s, cost=$%s, %dms, error=%s",
                     msg.session_id,
                     msg.total_cost_usd,
                     msg.duration_ms,
+                    error,
                 )
                 yield Result(
                     session_id=msg.session_id,
                     cost_usd=msg.total_cost_usd,
                     duration_ms=msg.duration_ms,
+                    error=error,
                 )

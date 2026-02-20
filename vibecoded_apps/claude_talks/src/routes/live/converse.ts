@@ -82,7 +82,11 @@ export function createConverseApi(
               console.log(
                 `[converse] done: ${nChunks} chunks, TTFT=${ttft}ms, total=${total}ms, cost=$${data.cost_usd}, sdk=${data.duration_ms}ms, session=${sessionId}\n[claude] ${fullText}`,
               );
-              onDone?.(data.cost_usd, data.duration_ms);
+              if (data.error) {
+                onError(`Claude Code error: ${data.error}`);
+              } else {
+                onDone?.(data.cost_usd, data.duration_ms);
+              }
             }
           }
         }

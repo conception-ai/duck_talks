@@ -47,6 +47,10 @@ export function createDataStore(deps: DataStoreDeps) {
   let pendingExecute: ((instruction: string) => void) | null = null;
   let pendingCancel: (() => void) | null = null;
 
+  // --- Toast (auto-clearing error display) ---
+  let toast = $state('');
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
   // --- Audio buffer (for STT corrections) ---
   let audioBuffer: RecordedChunk[] = [];
   let sessionStart = 0;
@@ -155,6 +159,9 @@ export function createDataStore(deps: DataStoreDeps) {
 
   function pushError(text: string) {
     voiceLog.push({ role: 'gemini', text, ts: Date.now() });
+    clearTimeout(toastTimer);
+    toast = text;
+    toastTimer = setTimeout(() => { toast = ''; }, 4000);
   }
 
   function setStatus(s: Status) {
@@ -297,6 +304,7 @@ export function createDataStore(deps: DataStoreDeps) {
   // --- Public surface ---
 
   return {
+    get toast() { return toast; },
     get status() { return status; },
     get messages() { return messages; },
     get voiceLog() { return voiceLog; },
