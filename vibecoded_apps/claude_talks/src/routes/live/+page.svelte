@@ -6,6 +6,7 @@
   import { startMic, createPlayer, playPcmChunks } from './audio';
   import { createConverseApi } from './converse';
   import { correctInstruction } from './correct';
+  import { DEFAULT_SYSTEM_PROMPT } from './defaults';
   import { createLLM } from '../../lib/llm';
   import type { AudioSink, ContentBlock, Message, STTCorrection } from './types';
 
@@ -26,7 +27,10 @@
         };
       },
     },
-    api: createConverseApi(),
+    api: createConverseApi('/api/converse', () => ({
+      model: ui.model,
+      systemPrompt: ui.systemPrompt,
+    })),
     getApiKey: () => ui.apiKey,
     getMode: () => ui.mode,
     correctInstruction: (instruction: string) => {
@@ -92,6 +96,9 @@
   let playingId = $state<string | null>(null);
   let stopPlaying: (() => void) | null = null;
   let showVoiceLog = $state(false);
+  let settingsOpen = $state(false);
+  let modelDraft = $state(ui.model);
+  let promptDraft = $state(ui.systemPrompt);
 
   function playCorrection(c: STTCorrection) {
     stopPlaying?.();
@@ -180,6 +187,9 @@
         Corrections ({corrections.corrections.length})
       </button>
     {/if}
+    <button class="header-sm" onclick={() => {
+      modelDraft = ui.model; promptDraft = ui.systemPrompt; settingsOpen = true;
+    }}>Settings</button>
     {#if live.status === 'idle'}
       <button onclick={live.start}>Start</button>
     {:else if live.status === 'connecting'}
@@ -358,6 +368,37 @@
   </div>
 {/if}
 
+{#if settingsOpen}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="backdrop" onkeydown={() => {}} onclick={() => { settingsOpen = false; }}>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="modal settings-modal" onkeydown={() => {}} onclick={(e) => e.stopPropagation()}>
+      <h2>Settings</h2>
+      <label>
+        Model
+        <select bind:value={modelDraft}>
+          <option value="haiku">Haiku</option>
+          <option value="sonnet">Sonnet</option>
+          <option value="opus">Opus</option>
+        </select>
+      </label>
+      <label>
+        System Prompt
+        <textarea bind:value={promptDraft} rows="10"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button onclick={() => { promptDraft = DEFAULT_SYSTEM_PROMPT; }}>Reset Prompt</button>
+        <button onclick={() => { settingsOpen = false; }}>Cancel</button>
+        <button onclick={() => {
+          ui.setModel(modelDraft);
+          ui.setSystemPrompt(promptDraft);
+          settingsOpen = false;
+        }}>Save</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <style>
   main {
     max-width: 600px;
@@ -445,6 +486,35 @@
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
+  }
+
+  .settings-modal {
+    width: min(550px, 90vw);
+  }
+
+  .settings-modal label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .settings-modal select,
+  .settings-modal textarea {
+    padding: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 400;
+    border: 1px solid #d1d5db;
+    border-radius: 0.25rem;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+  }
+
+  .settings-modal textarea {
+    resize: vertical;
+    min-height: 120px;
   }
 
   .messages {

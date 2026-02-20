@@ -6,6 +6,7 @@
  */
 
 import type { InteractionMode } from '../types';
+import { DEFAULT_MODEL, DEFAULT_SYSTEM_PROMPT } from '../defaults';
 
 const STORAGE_KEY = 'claude-talks:ui';
 
@@ -14,6 +15,8 @@ interface Persisted {
   apiKey: string | null;
   mode: InteractionMode;
   pttMode: boolean;
+  model: string;
+  systemPrompt: string;
 }
 
 function load(): Persisted {
@@ -28,7 +31,8 @@ function load(): Persisted {
       return parsed;
     }
   } catch { /* corrupted — fall through to default */ }
-  return { voiceEnabled: true, apiKey: null, mode: 'direct', pttMode: false };
+  return { voiceEnabled: true, apiKey: null, mode: 'direct', pttMode: false,
+           model: DEFAULT_MODEL, systemPrompt: DEFAULT_SYSTEM_PROMPT };
 }
 
 function save(state: Persisted) {
@@ -42,9 +46,11 @@ export function createUIStore() {
   let apiKeyModalOpen = $state(!apiKey);
   let mode = $state<InteractionMode>(persisted.mode);
   let pttMode = $state(persisted.pttMode);
+  let model = $state(persisted.model);
+  let systemPrompt = $state(persisted.systemPrompt);
 
   function persist() {
-    save({ voiceEnabled, apiKey, mode, pttMode });
+    save({ voiceEnabled, apiKey, mode, pttMode, model, systemPrompt });
   }
 
   function toggleVoice() {
@@ -93,5 +99,10 @@ export function createUIStore() {
     setApiKey,
     openApiKeyModal,
     closeApiKeyModal,
+    get model() { return model; },
+    get systemPrompt() { return systemPrompt; },
+    setModel(m: string) { model = m; persist(); },
+    setSystemPrompt(p: string) { systemPrompt = p; persist(); },
+    resetSystemPrompt() { systemPrompt = DEFAULT_SYSTEM_PROMPT; persist(); },
   };
 }

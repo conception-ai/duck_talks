@@ -1,6 +1,5 @@
 """FastAPI backend that streams Claude Code responses as SSE."""
 
-import asyncio
 import glob
 import json
 import logging
@@ -18,13 +17,8 @@ from models import AssistantEntry, Conversation, UserEntry, preview
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("api")
 
-_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
-_SYSTEM_PROMPT = (_PROMPT_DIR / "conversational_tone.md").read_text()
-
-log.info("system prompt loaded (%d chars)", len(_SYSTEM_PROMPT))
-
 app = FastAPI()
-claude = Claude(cwd="/Users/dhuynh95/claude_talks", system_prompt=_SYSTEM_PROMPT)
+claude = Claude(cwd="/Users/dhuynh95/claude_talks")
 
 _PROJECT_DIR = Path.home() / ".claude/projects/-Users-dhuynh95-claude-talks"
 
@@ -218,17 +212,27 @@ def _sse(data: dict[str, object]) -> str:
 class ConverseRequest(BaseModel):
     instruction: str
     session_id: str | None = None
+    model: str
+    system_prompt: str
 
 
 @app.post("/api/converse")
 async def converse(body: ConverseRequest) -> StreamingResponse:
-    log.info("converse: %s", body.instruction[:120])
+    log.info(
+        "converse: %s | model=%s prompt=%d chars",
+        body.instruction,
+        body.model,
+        len(body.system_prompt),
+    )
 
     async def stream():  # noqa: ANN202
         buf = ""
         n_chunks = 0
         async for chunk in claude.converse(
-            body.instruction, session_id=body.session_id
+            body.instruction,
+            session_id=body.session_id,
+            model=body.model,
+            system_prompt=body.system_prompt,
         ):
             if isinstance(chunk, TextDelta):
                 buf += chunk.text

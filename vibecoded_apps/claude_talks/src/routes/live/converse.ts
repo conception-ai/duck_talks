@@ -5,7 +5,15 @@
 
 import type { ConverseApi } from './types';
 
-export function createConverseApi(endpoint = '/api/converse'): ConverseApi {
+interface ConverseConfig {
+  model: string;
+  systemPrompt: string;
+}
+
+export function createConverseApi(
+  endpoint = '/api/converse',
+  getConfig?: () => ConverseConfig,
+): ConverseApi {
   let sessionId: string | null = null;
   let controller: AbortController | null = null;
 
@@ -22,7 +30,14 @@ export function createConverseApi(endpoint = '/api/converse'): ConverseApi {
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ instruction, session_id: sessionId }),
+          body: JSON.stringify({
+            instruction,
+            session_id: sessionId,
+            ...getConfig && {
+              model: getConfig().model,
+              system_prompt: getConfig().systemPrompt,
+            },
+          }),
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {

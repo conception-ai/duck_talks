@@ -2,7 +2,7 @@
 
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
 from typing import cast
 
@@ -56,29 +56,30 @@ class Claude:
             ...
     """
 
-    _options: ClaudeAgentOptions
+    _cwd: str
+    _stderr: Callable[[str], None]
 
-    def __init__(
-        self,
-        model: str = "haiku",
-        cwd: str | None = None,
-        system_prompt: str | None = None,
-    ):
-        self._options = ClaudeAgentOptions(
-            model=model,
-            cwd=cwd or os.getcwd(),
-            system_prompt=system_prompt or "",
-            include_partial_messages=True,
-            permission_mode="acceptEdits",
-            stderr=lambda line: log.debug("sdk: %s", line.rstrip()),
-        )
+    def __init__(self, cwd: str | None = None):
+        self._cwd = cwd or os.getcwd()
+        self._stderr = lambda line: log.debug("sdk: %s", line.rstrip())
 
     async def converse(
-        self, message: str, session_id: str | None = None
+        self,
+        message: str,
+        model: str,
+        system_prompt: str,
+        session_id: str | None = None,
     ) -> AsyncIterator[Chunk]:
-        options = self._options
+        options = ClaudeAgentOptions(
+            model=model,
+            cwd=self._cwd,
+            system_prompt=system_prompt,
+            include_partial_messages=True,
+            permission_mode="acceptEdits",
+            stderr=self._stderr,
+        )
         if session_id:
-            options = replace(self._options, resume=session_id)
+            options = replace(options, resume=session_id)
             log.info("resuming session %s", session_id)
 
         log.info("query: %s", message[:120])
