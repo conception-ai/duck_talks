@@ -124,23 +124,42 @@ Or use **Claude in Chrome** `javascript_tool` with `fetch()` — browser stdout 
 
 **Key tools**: `tabs_context_mcp` (get tab IDs), `tabs_create_mcp` (new tab), `navigate` (go to URL), `javascript_tool` (execute JS), `computer` (click/screenshot), `find` (locate elements), `read_page` (a11y tree), `read_console_messages` (console output). All take a `tabId` parameter — multiple tabs can be automated in parallel.
 
+**`javascript_tool` does NOT support top-level `await`**. Wrap all async code in an IIFE:
+```js
+// WRONG — SyntaxError
+const { setup } = await import('/src/lib/test-inject.ts');
+
+// RIGHT — async IIFE
+(async () => {
+  const { setup } = await import('/src/lib/test-inject.ts');
+  setup();
+  return 'done';
+})()
+```
+
 **Programmatic audio injection** — no mic needed, no saved recordings:
 > Uses `test-inject.ts` module + TTS to inject synthetic speech.
 > 1. `tabs_context_mcp` → get existing tabs, then `tabs_create_mcp` if needed to get a `tabId`
 > 2. `navigate` with `tabId` + `url: "http://localhost:5000/#/live"`
 > 3. `javascript_tool`: setup fake mic (BEFORE clicking Start)
 >    ```js
->    const { setup } = await import('/src/lib/test-inject.ts');
->    setup();
+>    (async () => {
+>      const { setup } = await import('/src/lib/test-inject.ts');
+>      setup();
+>      return 'fake mic ready';
+>    })()
 >    ```
 > 4. Click the mic orb (use `find` to locate it, then `computer` to click). Wait for `[live] connected` via `read_console_messages` with `pattern: "connected"`.
 > 5. `javascript_tool`: generate TTS + inject
 >    ```js
->    const { inject } = await import('/src/lib/test-inject.ts');
->    const { speak } = await import('/src/lib/tts.ts');
->    const key = JSON.parse(localStorage.getItem('claude-talks:ui') || '{}').apiKey;
->    const { data, sampleRate } = await speak(key, 'What are my todos in the todos folder? OVER.');
->    inject(data, sampleRate);
+>    (async () => {
+>      const { inject } = await import('/src/lib/test-inject.ts');
+>      const { speak } = await import('/src/lib/tts.ts');
+>      const key = JSON.parse(localStorage.getItem('claude-talks:ui') || '{}').apiKey;
+>      const { data, sampleRate } = await speak(key, 'What are my todos in the todos folder? OVER.');
+>      inject(data, sampleRate);
+>      return 'injected';
+>    })()
 >    ```
 > 6. Verify via `read_console_messages`: `[test] injected N samples` → `[user STT]` → `tool call: converse` → `[converse] TTFT: Nms`
 >
