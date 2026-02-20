@@ -3,7 +3,7 @@
 import glob
 import json
 import logging
-import re
+
 from pathlib import Path
 from typing import cast
 
@@ -191,20 +191,6 @@ def get_messages(session_id: str) -> list[MessageResponse]:
     return messages
 
 
-# Sentence-ending punctuation followed by space/newline, or standalone newline
-_BREAK = re.compile(r"(?<=[.!?])\s|(?<=\n)")
-
-
-def _sentence_break(buf: str) -> int:
-    """Find the last sentence boundary in buf, or force-break at 200+ chars."""
-    last = -1
-    for m in _BREAK.finditer(buf):
-        last = m.start()
-    if last >= 0:
-        return last
-    return 0 if len(buf) > 200 else -1
-
-
 def _sse(data: dict[str, object]) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
@@ -226,7 +212,6 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
     )
 
     async def stream():  # noqa: ANN202
-        buf = ""
         n_chunks = 0
         async for chunk in claude.converse(
             body.instruction,
@@ -235,17 +220,10 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
             system_prompt=body.system_prompt,
         ):
             if isinstance(chunk, TextDelta):
-                buf += chunk.text
-                while (idx := _sentence_break(buf)) >= 0:
-                    sentence = buf[: idx + 1].strip()
-                    buf = buf[idx + 1 :]
-                    if sentence:
-                        n_chunks += 1
-                        yield _sse({"text": sentence})
-            else:
-                if buf.strip():
+                if chunk.text:
                     n_chunks += 1
-                    yield _sse({"text": buf.strip()})
+                    yield _sse({"text": chunk.text})
+            else:
                 log.info(
                     "done: %d chunks, cost=$%s, %dms",
                     n_chunks,
