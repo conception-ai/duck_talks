@@ -1,5 +1,6 @@
 <script lang="ts">
   import { marked } from 'marked';
+  import { tick } from 'svelte';
   import { push } from 'svelte-spa-router';
   import { createDataStore } from './stores/data.svelte';
   import { createUIStore } from './stores/ui.svelte';
@@ -191,6 +192,15 @@
     review: 'Review',
     correct: 'Correct',
   };
+
+  let messagesEl: HTMLDivElement;
+
+  $effect(() => {
+    void live.messages.length;
+    void live.pendingInput;
+    void live.pendingTool?.text;
+    tick().then(() => messagesEl?.scrollTo(0, messagesEl.scrollHeight));
+  });
 </script>
 
 <main>
@@ -205,7 +215,7 @@
   {/if}
 
   <!-- CC Messages (persistent conversation) -->
-  <div class="messages">
+  <div class="messages" bind:this={messagesEl}>
     {#each live.messages as msg}
       <div class="msg {msg.role}">
         <span class="label">{msg.role === 'user' ? 'You' : 'Claude'}</span>
@@ -401,11 +411,13 @@
 <style>
   main {
     max-width: 600px;
-    margin: 2rem auto;
+    margin: 0 auto;
+    padding: 1rem;
+    height: 100dvh;
+    box-sizing: border-box;
     font-family: system-ui, sans-serif;
     display: flex;
     flex-direction: column;
-    min-height: calc(100vh - 4rem);
   }
 
   header {
@@ -534,6 +546,7 @@
     flex-direction: column;
     gap: 0.75rem;
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     padding: 0.5rem 0;
   }
