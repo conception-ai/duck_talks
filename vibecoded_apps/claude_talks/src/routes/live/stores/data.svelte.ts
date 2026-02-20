@@ -13,6 +13,7 @@ import type {
   AudioPort,
   AudioSink,
   AudioSource,
+  ContentBlock,
   ConverseApi,
   InteractionMode,
   LiveBackend,
@@ -71,12 +72,23 @@ export function createDataStore(deps: DataStoreDeps) {
   }
 
   function startTool(name: string, args: Record<string, unknown>) {
-    pendingTool = { name, args, text: '', streaming: true };
+    pendingTool = { name, args, text: '', blocks: [], streaming: true };
     awaitingToolDone = false;
   }
 
   function appendTool(text: string) {
-    if (pendingTool) pendingTool.text += text;
+    if (!pendingTool) return;
+    pendingTool.text += text;
+    const last = pendingTool.blocks.at(-1);
+    if (last?.type === 'text') {
+      last.text += text;
+    } else {
+      pendingTool.blocks.push({ type: 'text', text });
+    }
+  }
+
+  function appendBlock(block: ContentBlock) {
+    if (pendingTool) pendingTool.blocks.push(block);
   }
 
   function finishTool() {
@@ -144,8 +156,10 @@ export function createDataStore(deps: DataStoreDeps) {
           content: String(tool.args.instruction),
         });
       }
-      // Claude's response (degraded: text-only during live streaming)
-      if (tool.text) {
+      // Claude's response
+      if (tool.blocks.length > 0) {
+        messages.push({ role: 'assistant', content: tool.blocks });
+      } else if (tool.text) {
         messages.push({
           role: 'assistant',
           content: [{ type: 'text', text: tool.text }],
@@ -242,6 +256,7 @@ export function createDataStore(deps: DataStoreDeps) {
     appendOutput,
     startTool,
     appendTool,
+    appendBlock,
     finishTool,
     commitTurn,
     pushError,

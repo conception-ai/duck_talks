@@ -14,6 +14,7 @@ export interface PendingTool {
   name: string;
   args: Record<string, unknown>;
   text: string;
+  blocks: ContentBlock[];
   streaming: boolean;
 }
 
@@ -70,6 +71,7 @@ export interface DataStoreMethods {
   appendOutput(text: string): void;
   startTool(name: string, args: Record<string, unknown>): void;
   appendTool(text: string): void;
+  appendBlock(block: ContentBlock): void;
   finishTool(): void;
   commitTurn(): void;
   pushError(text: string): void;
@@ -130,6 +132,7 @@ export interface ConverseApi {
     instruction: string,
     callbacks: {
       onChunk: (text: string) => void;
+      onBlock?: (block: ContentBlock) => void;
       onDone?: (cost: number, durationMs: number) => void;
       onError: (msg: string) => void;
     },

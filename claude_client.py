@@ -7,8 +7,12 @@ from dataclasses import dataclass, replace
 from typing import cast
 
 from claude_agent_sdk import (
+    AssistantMessage,
     ClaudeAgentOptions,
     ResultMessage,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
     query,
 )
 from claude_agent_sdk.types import StreamEvent
@@ -31,6 +35,11 @@ class TextDelta:
 
 
 @dataclass
+class ContentBlockChunk:
+    block: dict[str, object]
+
+
+@dataclass
 class Result:
     session_id: str
     cost_usd: float | None
@@ -38,7 +47,7 @@ class Result:
     error: str | None = None
 
 
-type Chunk = TextDelta | Result
+type Chunk = TextDelta | ContentBlockChunk | Result
 
 
 class Claude:
@@ -89,6 +98,32 @@ class Claude:
                 delta = cast(dict[str, str], msg.event.get("delta", {}))
                 if text := delta.get("text"):
                     yield TextDelta(text=text)
+            elif isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, ToolUseBlock):
+                        yield ContentBlockChunk(
+                            block={
+                                "type": "tool_use",
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        )
+            elif isinstance(msg, UserMessage):
+                for block in msg.content if isinstance(msg.content, list) else []:
+                    if isinstance(block, ToolResultBlock):
+                        raw = block.content
+                        yield ContentBlockChunk(
+                            block={
+                                "type": "tool_result",
+                                "tool_use_id": block.tool_use_id,
+                                "content": raw
+                                if isinstance(raw, str)
+                                else str(raw)
+                                if raw
+                                else "",
+                            }
+                        )
             elif isinstance(msg, ResultMessage):
                 error = msg.result if msg.is_error else None
                 log.info(

@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from claude_client import Claude, TextDelta
+from claude_client import Claude, ContentBlockChunk, TextDelta
 from models import AssistantEntry, Conversation, UserEntry, preview
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
@@ -220,6 +220,8 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
                 if chunk.text:
                     n_chunks += 1
                     yield _sse({"text": chunk.text})
+            elif isinstance(chunk, ContentBlockChunk):
+                yield _sse({"block": chunk.block})
             else:
                 log.info(
                     "done: %d chunks, cost=$%s, %dms",

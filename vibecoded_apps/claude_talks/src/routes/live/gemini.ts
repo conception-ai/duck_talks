@@ -198,6 +198,9 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
                   geminiTimer = setTimeout(flushGeminiBuf, 1000);
                 }
               },
+              onBlock(block) {
+                data.appendBlock(block);
+              },
               onDone() {
                 flushGeminiBuf();
                 conversePhase = 'idle';

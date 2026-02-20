@@ -23,7 +23,7 @@ export function createConverseApi(
 
     abort() { controller?.abort(); controller = null; },
 
-    async stream(instruction, { onChunk, onDone, onError }) {
+    async stream(instruction, { onChunk, onBlock, onDone, onError }) {
       const t0 = performance.now();
       console.log('[converse] starting:', instruction.slice(0, 120), 'session:', sessionId);
       controller = new AbortController();
@@ -75,6 +75,9 @@ export function createConverseApi(
               }
               console.log(`[converse chunk ${nChunks} +${elapsed}ms] ${JSON.stringify(data.text)}`);
               onChunk(data.text);
+            }
+            if (data.block) {
+              onBlock?.(data.block);
             }
             if (data.done) {
               if (data.session_id) sessionId = data.session_id;
