@@ -284,6 +284,7 @@ export function createDataStore(deps: DataStoreDeps) {
   function stop() {
     if (pendingTool?.streaming) pendingTool.streaming = false;
     commitTurn();
+    api.abort();
     mic?.stop();
     mic = null;
     player?.stop();

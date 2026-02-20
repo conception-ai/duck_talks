@@ -344,12 +344,13 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       'color:#7c3aed;white-space:pre-wrap',
     );
 
+    let closed = false;
+
     return {
-      sendRealtimeInput: (input) => session.sendRealtimeInput(input),
-      sendClientContent: (content) => session.sendClientContent(content),
-      sendToolResponse: (response) =>
-        session.sendToolResponse(response as LiveSendToolResponseParameters),
-      close: () => session.close(),
+      sendRealtimeInput: (input) => { if (!closed) session.sendRealtimeInput(input); },
+      sendClientContent: (content) => { if (!closed) session.sendClientContent(content); },
+      sendToolResponse: (response) => { if (!closed) session.sendToolResponse(response as LiveSendToolResponseParameters); },
+      close: () => { closed = true; sessionRef = null; session.close(); },
     };
   } catch (e: unknown) {
     console.error(`[${tag}] connect failed:`, e);
