@@ -128,6 +128,7 @@ export interface LiveBackend {
 
 export interface ConverseApi {
   sessionId: string | null;
+  sessionStart: number;
   stream(
     instruction: string,
     callbacks: {

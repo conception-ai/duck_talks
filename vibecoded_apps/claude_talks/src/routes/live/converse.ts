@@ -5,7 +5,8 @@
 
 import type { ConverseApi } from './types';
 
-const ORANGE = 'background:#d97706;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
+const ORANGE_BADGE = 'background:#d97706;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
+const ORANGE_TEXT = 'color:#fb923c';
 const DIM = 'color:#9ca3af';
 
 interface ConverseConfig {
@@ -14,28 +15,33 @@ interface ConverseConfig {
   permissionMode: string;
 }
 
+function fmtTs(t0: number): string {
+  const elapsed = (Date.now() - t0) / 1000;
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  return `${String(mins).padStart(2, '0')}:${secs.toFixed(2).padStart(5, '0')}`;
+}
+
 export function createConverseApi(
   endpoint = '/api/converse',
   getConfig?: () => ConverseConfig,
 ): ConverseApi {
   let sessionId: string | null = null;
+  let sessionStart: number = Date.now();
   let controller: AbortController | null = null;
 
   return {
     get sessionId() { return sessionId; },
     set sessionId(id: string | null) { sessionId = id; },
+    get sessionStart() { return sessionStart; },
+    set sessionStart(t: number) { sessionStart = t; },
 
     abort() { controller?.abort(); controller = null; },
 
     async stream(instruction, { onChunk, onBlock, onDone, onError }) {
-      const t0 = performance.now();
-      const ts = () => {
-        const elapsed = (performance.now() - t0) / 1000;
-        const mins = Math.floor(elapsed / 60);
-        const secs = elapsed % 60;
-        return `${String(mins).padStart(2, '0')}:${secs.toFixed(2).padStart(5, '0')}`;
-      };
-      console.log(`%c CLAUDE %c ${ts()} starting: ${instruction.slice(0, 80)}`, ORANGE, DIM);
+      const callT0 = performance.now();
+      const ts = () => fmtTs(sessionStart);
+      console.log(`%c CLAUDE %c ${ts()} starting: ${instruction.slice(0, 80)}`, ORANGE_BADGE, DIM);
       controller = new AbortController();
       try {
         const res = await fetch(endpoint, {
@@ -53,7 +59,7 @@ export function createConverseApi(
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {
-          console.error(`%c CLAUDE %c ${ts()} fetch failed: ${res.status}`, ORANGE, DIM);
+          console.error(`%c CLAUDE %c ${ts()} fetch failed: ${res.status}`, ORANGE_BADGE, DIM);
           onError(`Claude Code request failed (${res.status}).`);
           return;
         }
@@ -80,9 +86,10 @@ export function createConverseApi(
               nChunks++;
               fullText += data.text;
               if (nChunks === 1) {
-                ttft = Math.round(performance.now() - t0);
-                console.log(`%c CLAUDE %c ${ts()} TTFT: ${ttft}ms`, ORANGE, DIM);
+                ttft = Math.round(performance.now() - callT0);
+                console.log(`%c CLAUDE %c ${ts()} TTFT: ${ttft}ms`, ORANGE_BADGE, DIM);
               }
+              console.log(`%c${data.text}`, ORANGE_TEXT);
               onChunk(data.text);
             }
             if (data.block) {
@@ -92,7 +99,7 @@ export function createConverseApi(
               if (data.session_id) sessionId = data.session_id;
               console.log(
                 `%c CLAUDE %c ${ts()} done: ${nChunks} chunks, cost=$${data.cost_usd}`,
-                ORANGE, DIM,
+                ORANGE_BADGE, DIM,
               );
               if (data.error) {
                 onError(`Claude Code error: ${data.error}`);
@@ -103,7 +110,7 @@ export function createConverseApi(
           }
         }
       } catch (e) {
-        console.error(`%c CLAUDE %c ${ts()} error`, ORANGE, DIM, e);
+        console.error(`%c CLAUDE %c ${ts()} error`, ORANGE_BADGE, DIM, e);
         onError('Claude Code request failed.');
       } finally {
         controller = null;

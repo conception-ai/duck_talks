@@ -64,8 +64,9 @@ import { TOOLS, handleToolCall } from './tools';
 import type { AudioSink, ConverseApi, DataStoreMethods, InteractionMode, LiveBackend } from './types';
 
 // --- Log styles ---
-const BLUE = 'background:#2563eb;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
-const ORANGE = 'background:#d97706;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
+const BLUE_BADGE = 'background:#2563eb;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
+const BLUE_TEXT = 'color:#60a5fa';
+const ORANGE_BADGE = 'background:#d97706;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
 const DIM = 'color:#9ca3af';
 
 const BASE_PROMPT = `
@@ -109,8 +110,8 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   // Converse phase: idle → suppressing (tool call) → relaying (1st Claude chunk) → idle (done)
   let conversePhase: 'idle' | 'suppressing' | 'relaying' = 'idle';
   let userSpokeInTurn = false;
-  let lastUserSpeechAt = 0;
-  let geminiTTFTLogged = false;
+  let geminiRelayT0 = 0;
+  let geminiRelayTTFTLogged = false;
   const t0 = Date.now();
   const ts = () => {
     const elapsed = (Date.now() - t0) / 1000;
@@ -129,7 +130,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
 
       data.commitTurn();
       for (const fc of message.toolCall.functionCalls) {
-        console.log(`%c GEMINI %c ${ts()} tool: ${fc.name}`, BLUE, DIM, fc.args);
+        console.log(`%c GEMINI %c ${ts()} tool: ${fc.name}`, BLUE_BADGE, DIM, fc.args);
 
         if (fc.name === 'accept_instruction') {
           data.approve();
@@ -194,10 +195,14 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
               onChunk(text) {
                 data.appendTool(text);
                 if (!sessionRef) {
-                  console.error(`%c CLAUDE %c session is null, cannot send chunk`, ORANGE, DIM);
+                  console.error(`%c CLAUDE %c session is null, cannot send chunk`, ORANGE_BADGE, DIM);
                   return;
                 }
-                if (conversePhase === 'suppressing') conversePhase = 'relaying';
+                if (conversePhase === 'suppressing') {
+                  conversePhase = 'relaying';
+                  geminiRelayT0 = Date.now();
+                  geminiRelayTTFTLogged = false;
+                }
 
                 if (geminiFlushed) {
                   sendToGemini(text);
@@ -275,7 +280,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     if (!sc) return;
 
     if (sc.interrupted) {
-      console.log(`%c GEMINI %c ${ts()} interrupted`, BLUE, DIM);
+      console.log(`%c GEMINI %c ${ts()} interrupted`, BLUE_BADGE, DIM);
       userSpokeInTurn = false;
       player.flush();
       data.commitTurn();
@@ -285,8 +290,6 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     // User speech — always pass through, even during converse.
     if (sc.inputTranscription?.text) {
       console.log(`${ts()} [user] ${sc.inputTranscription.text}`);
-      lastUserSpeechAt = Date.now();
-      geminiTTFTLogged = false;
       data.appendInput(sc.inputTranscription.text);
       userSpokeInTurn = true;
     }
@@ -296,11 +299,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     // "Asking Claude" arrives BEFORE the toolCall message, so it naturally
     // passes through while conversePhase is still 'idle'.
     if (sc.outputTranscription?.text && conversePhase === 'idle') {
-      if (lastUserSpeechAt && !geminiTTFTLogged) {
-        console.log(`%c GEMINI %c ${ts()} TTFT: ${Date.now() - lastUserSpeechAt}ms`, BLUE, DIM);
-        geminiTTFTLogged = true;
-      }
-      console.log(`%c GEMINI %c ${ts()} ${sc.outputTranscription.text}`, BLUE, DIM);
+      console.log(`%c${sc.outputTranscription.text}`, BLUE_TEXT);
       data.appendOutput(sc.outputTranscription.text);
     }
 
@@ -310,13 +309,17 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     if (sc.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {
         if (part.inlineData?.data && conversePhase !== 'suppressing') {
+          if (conversePhase === 'relaying' && geminiRelayT0 && !geminiRelayTTFTLogged) {
+            console.log(`%c GEMINI %c ${ts()} relay TTFT: ${Date.now() - geminiRelayT0}ms`, BLUE_BADGE, DIM);
+            geminiRelayTTFTLogged = true;
+          }
           player.play(part.inlineData.data);
         }
       }
     }
 
     if (sc.turnComplete) {
-      console.log(`%c GEMINI %c ${ts()} done`, BLUE, DIM);
+      console.log(`%c GEMINI %c ${ts()} done`, BLUE_BADGE, DIM);
       data.commitTurn();
 
       // Nudge: Gemini completed without calling converse after user spoke
@@ -358,6 +361,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       },
     });
     sessionRef = session;
+    converseApi.sessionStart = t0;
     console.log(
       `%c SYSTEM %c\n${BASE_PROMPT.trim()}`,
       'background:#6b7280;color:white;font-weight:bold;padding:1px 6px;border-radius:3px',
