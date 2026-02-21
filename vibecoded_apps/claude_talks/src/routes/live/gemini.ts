@@ -63,6 +63,11 @@ import {
 import { TOOLS, handleToolCall } from './tools';
 import type { AudioSink, ConverseApi, DataStoreMethods, InteractionMode, LiveBackend } from './types';
 
+// --- Log styles ---
+const BLUE = 'background:#2563eb;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
+const ORANGE = 'background:#d97706;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
+const DIM = 'color:#9ca3af';
+
 const BASE_PROMPT = `
 You are a voice relay between a user and Claude Code (a powerful coding agent).
 
@@ -106,8 +111,15 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   // Converse phase: idle → suppressing (tool call) → relaying (1st Claude chunk) → idle (done)
   let conversePhase: 'idle' | 'suppressing' | 'relaying' = 'idle';
   let userSpokeInTurn = false;
+  let lastUserSpeechAt = 0;
+  let geminiTTFTLogged = false;
   const t0 = Date.now();
-  const ts = () => `+${((Date.now() - t0) / 1000).toFixed(1)}s`;
+  const ts = () => {
+    const elapsed = (Date.now() - t0) / 1000;
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    return `${String(mins).padStart(2, '0')}:${secs.toFixed(2).padStart(5, '0')}`;
+  };
 
   async function handleMessage(message: LiveServerMessage) {
     // --- Tool calls ---
@@ -119,7 +131,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
 
       data.commitTurn();
       for (const fc of message.toolCall.functionCalls) {
-        console.log(`[${tag} ${ts()}] tool call:`, fc.name, fc.args);
+        console.log(`%c GEMINI %c ${ts()} tool: ${fc.name}`, BLUE, DIM, fc.args);
 
         if (fc.name === 'accept_instruction') {
           data.approve();
@@ -184,7 +196,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
               onChunk(text) {
                 data.appendTool(text);
                 if (!sessionRef) {
-                  console.error('[converse] session is null, cannot send chunk');
+                  console.error(`%c CLAUDE %c session is null, cannot send chunk`, ORANGE, DIM);
                   return;
                 }
                 if (conversePhase === 'suppressing') conversePhase = 'relaying';
@@ -219,7 +231,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             executeConverse(instruction);
           } else if (mode === 'correct') {
             // LLM auto-corrects, then hold for approval
-            console.log(`[${tag} ${ts()}] correct mode: running LLM correction`);
+            console.log(`${ts()} correct mode: running LLM correction`);
             deps.correctInstruction(instruction).then(
               (corrected) => {
                 data.holdForApproval(
@@ -239,7 +251,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             );
           } else {
             // review mode
-            console.log(`[${tag} ${ts()}] review mode: holding converse for approval`);
+            console.log(`${ts()} review mode: holding for approval`);
             data.holdForApproval(
               { instruction, audioChunks },
               executeConverse,
@@ -250,7 +262,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
         }
 
         const result = await handleToolCall(fc.name!, fc.args ?? {});
-        console.log(`[${tag}] tool result:`, result);
+        console.log(`${ts()} tool result:`, result);
         data.appendTool(JSON.stringify(result));
         data.finishTool();
         sessionRef?.sendToolResponse({
@@ -265,7 +277,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     if (!sc) return;
 
     if (sc.interrupted) {
-      console.log(`[${tag} ${ts()}] interrupted`);
+      console.log(`%c GEMINI %c ${ts()} interrupted`, BLUE, DIM);
       userSpokeInTurn = false;
       player.flush();
       data.commitTurn();
@@ -274,7 +286,9 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
 
     // User speech — always pass through, even during converse.
     if (sc.inputTranscription?.text) {
-      console.log(`[user STT ${ts()}] ${sc.inputTranscription.text}`);
+      console.log(`${ts()} [user] ${sc.inputTranscription.text}`);
+      lastUserSpeechAt = Date.now();
+      geminiTTFTLogged = false;
       data.appendInput(sc.inputTranscription.text);
       userSpokeInTurn = true;
     }
@@ -284,7 +298,11 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     // "Asking Claude" arrives BEFORE the toolCall message, so it naturally
     // passes through while conversePhase is still 'idle'.
     if (sc.outputTranscription?.text && conversePhase === 'idle') {
-      console.log(`[gemini ${ts()}] ${sc.outputTranscription.text}`);
+      if (lastUserSpeechAt && !geminiTTFTLogged) {
+        console.log(`%c GEMINI %c ${ts()} TTFT: ${Date.now() - lastUserSpeechAt}ms`, BLUE, DIM);
+        geminiTTFTLogged = true;
+      }
+      console.log(`%c GEMINI %c ${ts()} ${sc.outputTranscription.text}`, BLUE, DIM);
       data.appendOutput(sc.outputTranscription.text);
     }
 
@@ -300,11 +318,12 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     }
 
     if (sc.turnComplete) {
+      console.log(`%c GEMINI %c ${ts()} done`, BLUE, DIM);
       data.commitTurn();
 
       // Nudge: Gemini completed without calling converse after user spoke
       if (userSpokeInTurn && conversePhase === 'idle') {
-        console.log(`[${tag} ${ts()}] no tool call after user speech, nudging`);
+        console.log(`${ts()} [nudge] no tool call after user speech`);
         sessionRef?.sendClientContent({
           turns: [{ role: 'user', parts: [{ text: 'You did not call the converse tool. Please call it now.' }] }],
           turnComplete: true,
@@ -326,25 +345,25 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       },
       callbacks: {
         onopen: () => {
-          console.log(`[${tag} ${ts()}] connected`);
+          console.log(`${ts()} connected`);
           data.setStatus('connected');
         },
         onmessage: (msg: LiveServerMessage) => handleMessage(msg),
         onerror: (e: ErrorEvent) => {
-          console.error(`[${tag}] error:`, e);
+          console.error(`${ts()} error:`, e);
           data.pushError(`Error: ${e.message}`);
         },
         onclose: (e: CloseEvent) => {
-          console.log(`[${tag} ${ts()}] closed:`, e.reason);
+          console.log(`${ts()} closed: ${e.reason}`);
           data.setStatus('idle');
         },
       },
     });
     sessionRef = session;
     console.log(
-      `%c[${tag}] SYSTEM PROMPT%c\n${BASE_PROMPT.trim()}`,
-      'background:#7c3aed;color:white;font-weight:bold;padding:2px 6px;border-radius:3px',
-      'color:#7c3aed;white-space:pre-wrap',
+      `%c SYSTEM %c\n${BASE_PROMPT.trim()}`,
+      'background:#6b7280;color:white;font-weight:bold;padding:1px 6px;border-radius:3px',
+      'color:#9ca3af;white-space:pre-wrap',
     );
 
     let closed = false;
@@ -356,7 +375,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       close: () => { closed = true; sessionRef = null; session.close(); },
     };
   } catch (e: unknown) {
-    console.error(`[${tag}] connect failed:`, e);
+    console.error(`${ts()} connect failed:`, e);
     data.pushError(
       `Failed: ${e instanceof Error ? e.message : String(e)}`,
     );

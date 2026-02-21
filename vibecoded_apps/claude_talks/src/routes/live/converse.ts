@@ -5,6 +5,9 @@
 
 import type { ConverseApi } from './types';
 
+const ORANGE = 'background:#d97706;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
+const DIM = 'color:#9ca3af';
+
 interface ConverseConfig {
   model: string;
   systemPrompt: string;
@@ -26,7 +29,13 @@ export function createConverseApi(
 
     async stream(instruction, { onChunk, onBlock, onDone, onError }) {
       const t0 = performance.now();
-      console.log('[converse] starting:', instruction.slice(0, 120), 'session:', sessionId);
+      const ts = () => {
+        const elapsed = (performance.now() - t0) / 1000;
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        return `${String(mins).padStart(2, '0')}:${secs.toFixed(2).padStart(5, '0')}`;
+      };
+      console.log(`%c CLAUDE %c ${ts()} starting: ${instruction.slice(0, 80)}`, ORANGE, DIM);
       controller = new AbortController();
       try {
         const res = await fetch(endpoint, {
@@ -44,7 +53,7 @@ export function createConverseApi(
           signal: controller.signal,
         });
         if (!res.ok || !res.body) {
-          console.error('[converse] fetch failed:', res.status);
+          console.error(`%c CLAUDE %c ${ts()} fetch failed: ${res.status}`, ORANGE, DIM);
           onError(`Claude Code request failed (${res.status}).`);
           return;
         }
@@ -70,12 +79,10 @@ export function createConverseApi(
             if (data.text) {
               nChunks++;
               fullText += data.text;
-              const elapsed = Math.round(performance.now() - t0);
               if (nChunks === 1) {
-                ttft = elapsed;
-                console.log(`[converse] TTFT: ${elapsed}ms, first chunk: ${JSON.stringify(data.text)}`);
+                ttft = Math.round(performance.now() - t0);
+                console.log(`%c CLAUDE %c ${ts()} TTFT: ${ttft}ms`, ORANGE, DIM);
               }
-              console.log(`[converse chunk ${nChunks} +${elapsed}ms] ${JSON.stringify(data.text)}`);
               onChunk(data.text);
             }
             if (data.block) {
@@ -83,9 +90,9 @@ export function createConverseApi(
             }
             if (data.done) {
               if (data.session_id) sessionId = data.session_id;
-              const total = Math.round(performance.now() - t0);
               console.log(
-                `[converse] done: ${nChunks} chunks, TTFT=${ttft}ms, total=${total}ms, cost=$${data.cost_usd}, sdk=${data.duration_ms}ms, session=${sessionId}\n[claude] ${fullText}`,
+                `%c CLAUDE %c ${ts()} done: ${nChunks} chunks, cost=$${data.cost_usd}`,
+                ORANGE, DIM,
               );
               if (data.error) {
                 onError(`Claude Code error: ${data.error}`);
@@ -96,7 +103,7 @@ export function createConverseApi(
           }
         }
       } catch (e) {
-        console.error('[converse] SSE error:', e);
+        console.error(`%c CLAUDE %c ${ts()} error`, ORANGE, DIM, e);
         onError('Claude Code request failed.');
       } finally {
         controller = null;
