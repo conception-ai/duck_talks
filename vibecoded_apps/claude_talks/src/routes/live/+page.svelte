@@ -161,6 +161,7 @@
     playingId = 'approval';
   }
 
+  let hoveredMsg = $state<number | null>(null);
   let editing = $state(false);
   let editDraft = $state('');
 
@@ -224,9 +225,16 @@
   {/if}
 
   <!-- CC Messages (persistent conversation) -->
-  <div class="messages" bind:this={messagesEl}>
-    {#each live.messages as msg}
-      <div class="msg {msg.role}">
+  <div class="scroll-area" bind:this={messagesEl}>
+  <div class="messages">
+    {#each live.messages as msg, i}
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="msg {msg.role}"
+           onmouseenter={() => hoveredMsg = i}
+           onmouseleave={() => hoveredMsg = null}>
+        {#if hoveredMsg === i && msg.role === 'user' && i >= 2 && msg.uuid}
+          <button class="rewind-btn" onclick={() => live.rewindTo(i)}>Rewind</button>
+        {/if}
         {#if messageText(msg)}
           {#if msg.role === 'assistant'}
             <div class="markdown">{@html marked.parse(messageText(msg))}</div>
@@ -300,6 +308,7 @@
         </div>
       {/if}
     {/if}
+  </div>
   </div>
 
   <!-- Toast -->
@@ -438,9 +447,7 @@
 
 <style>
   main {
-    max-width: 600px;
-    margin: 0 auto;
-    padding: 1rem;
+    width: 100%;
     height: 100dvh;
     box-sizing: border-box;
     font-family: system-ui, sans-serif;
@@ -453,6 +460,12 @@
     align-items: center;
     gap: 1rem;
     margin-bottom: 0.5rem;
+    max-width: 600px;
+    width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    padding: 0.5rem 1rem 0;
+    box-sizing: border-box;
   }
 
   .header-link {
@@ -576,19 +589,51 @@
     border-color: #93c5fd;
   }
 
+  .scroll-area {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
   .messages {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 0.5rem 0;
+    max-width: 600px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0.5rem 1rem;
+    box-sizing: border-box;
   }
 
   .msg {
+    position: relative;
     padding: 0.5rem 0;
     max-width: 85%;
+  }
+
+  .rewind-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    font-size: 0.65rem;
+    padding: 0.15rem 0.5rem;
+    color: #9ca3af;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.25rem;
+    background: white;
+    cursor: pointer;
+    opacity: 0;
+    animation: fade-in 0.15s ease-out forwards;
+  }
+
+  .rewind-btn:hover {
+    color: #dc2626;
+    border-color: #dc2626;
+  }
+
+  @keyframes fade-in {
+    to { opacity: 1; }
   }
 
   .msg.user {
@@ -857,7 +902,9 @@
   /* Input bar */
   .input-bar {
     flex-shrink: 0;
-    margin: 0.5rem 0;
+    margin: 0.5rem auto;
+    max-width: 600px;
+    width: 100%;
     display: flex;
     align-items: flex-end;
     gap: 0.5rem;
@@ -866,6 +913,7 @@
     border: 1px solid #e5e7eb;
     border-radius: 1.25rem;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
   }
 
   .mode-status {
