@@ -562,7 +562,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: 0.5rem 0 5rem;
+    padding: 0.5rem 0;
   }
 
   .msg {
@@ -844,11 +844,8 @@
 
   /* Input bar */
   .input-bar {
-    position: fixed;
-    bottom: 1rem;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(600px, calc(100vw - 2rem));
+    flex-shrink: 0;
+    margin: 0.5rem 0;
     display: flex;
     align-items: flex-end;
     gap: 0.5rem;
@@ -857,19 +854,14 @@
     border: 1px solid #e5e7eb;
     border-radius: 1.25rem;
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-    z-index: 50;
   }
 
   .mode-badge {
-    position: absolute;
-    top: -0.5rem;
-    left: 1rem;
     font-size: 0.6rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: #9ca3af;
-    background: white;
-    padding: 0 0.25rem;
+    padding: 0.25rem 0;
   }
 
   .waveform {
