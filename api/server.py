@@ -9,6 +9,8 @@ from typing import cast
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from typing import Literal
+
 from pydantic import BaseModel
 
 from claude_client import Claude, ContentBlockChunk, TextDelta
@@ -197,6 +199,9 @@ class ConverseRequest(BaseModel):
     session_id: str | None = None
     model: str
     system_prompt: str
+    permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] = (
+        "plan"
+    )
 
 
 @app.post("/api/converse")
@@ -215,6 +220,7 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
             session_id=body.session_id,
             model=body.model,
             system_prompt=body.system_prompt,
+            permission_mode=body.permission_mode,
         ):
             if isinstance(chunk, TextDelta):
                 if chunk.text:

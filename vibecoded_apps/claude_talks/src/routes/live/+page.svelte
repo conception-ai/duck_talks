@@ -32,6 +32,7 @@
     api: createConverseApi('/api/converse', () => ({
       model: ui.model,
       systemPrompt: ui.systemPrompt,
+      permissionMode: ui.permissionMode,
     })),
     getApiKey: () => ui.apiKey,
     getMode: () => ui.mode,
@@ -98,6 +99,7 @@
   let voiceDraft = $state(ui.voiceEnabled);
   let modeDraft = $state<InteractionMode>(ui.mode);
   let modelDraft = $state(ui.model);
+  let permissionModeDraft = $state(ui.permissionMode);
   let promptDraft = $state(ui.systemPrompt);
 
   function openSettings() {
@@ -105,6 +107,7 @@
     voiceDraft = ui.voiceEnabled;
     modeDraft = ui.mode;
     modelDraft = ui.model;
+    permissionModeDraft = ui.permissionMode;
     promptDraft = ui.systemPrompt;
     settingsOpen = true;
   }
@@ -114,6 +117,7 @@
     if (voiceDraft !== ui.voiceEnabled) ui.toggleVoice();
     ui.setMode(modeDraft);
     ui.setModel(modelDraft);
+    ui.setPermissionMode(permissionModeDraft);
     ui.setSystemPrompt(promptDraft);
     settingsOpen = false;
   }
@@ -187,11 +191,6 @@
     editing = false;
   }
 
-  const MODE_LABELS: Record<InteractionMode, string> = {
-    direct: 'Direct',
-    review: 'Review',
-    correct: 'Correct',
-  };
 
   let messagesEl: HTMLDivElement;
 
@@ -203,11 +202,18 @@
   });
 </script>
 
+<svelte:window onkeydown={(e) => {
+  if (e.key === 'Tab' && e.shiftKey) {
+    e.preventDefault();
+    ui.cyclePermissionMode();
+  }
+}} />
+
 <main>
   <header>
-    <button class="header-btn" onclick={() => push('/')}>Home</button>
-    <h1>Claude</h1>
-    <button class="header-btn" onclick={openSettings}>Settings</button>
+    <button class="header-link" onclick={() => push('/')}>Home</button>
+    <span class="header-spacer"></span>
+    <button class="header-link" onclick={openSettings}>Settings</button>
   </header>
 
   {#if historyLoading}
@@ -218,7 +224,6 @@
   <div class="messages" bind:this={messagesEl}>
     {#each live.messages as msg}
       <div class="msg {msg.role}">
-        <span class="label">{msg.role === 'user' ? 'You' : 'Claude'}</span>
         {#if messageText(msg)}
           {#if msg.role === 'assistant'}
             <div class="markdown">{@html marked.parse(messageText(msg))}</div>
@@ -254,7 +259,6 @@
     <!-- Pending: live transcription -->
     {#if live.pendingInput}
       <div class="msg user pending">
-        <span class="label">You</span>
         <p>{live.pendingInput}</p>
       </div>
     {/if}
@@ -263,7 +267,6 @@
     {#if live.pendingTool}
       {#if live.pendingApproval}
         <div class="msg assistant approval">
-          <span class="label">Claude</span>
           <p>{live.pendingApproval.instruction}</p>
           {#if editing}
             <textarea class="edit-instruction" bind:value={editDraft}></textarea>
@@ -286,12 +289,10 @@
         </div>
       {:else if live.pendingTool.text}
         <div class="msg assistant pending">
-          <span class="label">Claude</span>
           <div class="markdown">{@html marked.parse(live.pendingTool.text)}</div>
         </div>
       {:else}
         <div class="msg assistant pending">
-          <span class="label">Claude</span>
           <p class="thinking-dots"><span></span><span></span><span></span></p>
         </div>
       {/if}
@@ -305,7 +306,6 @@
 
   <!-- Input bar -->
   <div class="input-bar">
-    <span class="mode-badge">{MODE_LABELS[ui.mode]}</span>
     {#if live.status === 'connected'}
       <div class="waveform">
         {#each [1.0, 0.8, 1.15, 0.85, 1.05] as dur, i}
@@ -327,6 +327,9 @@
       </svg>
     </button>
   </div>
+  <button class="mode-status" class:mode-accept={ui.permissionMode !== 'plan'} onclick={() => ui.cyclePermissionMode()}>
+    {ui.permissionMode === 'plan' ? 'plan' : 'accept edits'} (shift+tab to cycle)
+  </button>
 </main>
 
 <!-- Settings modal (consolidated) -->
@@ -356,6 +359,14 @@
           <option value="direct">Direct</option>
           <option value="review">Review</option>
           <option value="correct">Correct</option>
+        </select>
+      </label>
+
+      <label>
+        Permission Mode
+        <select bind:value={permissionModeDraft}>
+          <option value="plan">Plan</option>
+          <option value="acceptEdits">Accept Edits</option>
         </select>
       </label>
 
@@ -438,17 +449,24 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
   }
 
-  header h1 {
-    margin: 0;
-    flex: 1;
-    text-align: center;
-  }
-
-  .header-btn {
+  .header-link {
     font-size: 0.8rem;
+    color: #9ca3af;
+    border: none;
+    padding: 0.25rem 0;
+    background: none;
+    cursor: pointer;
+  }
+
+  .header-link:hover {
+    color: #374151;
+  }
+
+  .header-spacer {
+    flex: 1;
   }
 
   button {
@@ -566,26 +584,17 @@
   }
 
   .msg {
-    padding: 0.5rem 0.75rem;
-    border-radius: 0.5rem;
+    padding: 0.5rem 0;
+    max-width: 85%;
   }
 
   .msg.user {
-    background: #f0f0f0;
     align-self: flex-end;
     text-align: right;
   }
 
   .msg.assistant {
-    background: #e8f4fd;
     align-self: flex-start;
-  }
-
-  .label {
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    opacity: 0.5;
   }
 
   .thinking {
@@ -853,15 +862,26 @@
     background: white;
     border: 1px solid #e5e7eb;
     border-radius: 1.25rem;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
   }
 
-  .mode-badge {
-    font-size: 0.6rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #9ca3af;
+  .mode-status {
+    flex-shrink: 0;
+    align-self: center;
+    font-size: 0.7rem;
+    color: #059669;
+    border: none;
+    background: none;
     padding: 0.25rem 0;
+    cursor: pointer;
+  }
+
+  .mode-status:hover {
+    opacity: 0.7;
+  }
+
+  .mode-status.mode-accept {
+    color: #7c3aed;
   }
 
   .waveform {

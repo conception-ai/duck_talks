@@ -8,6 +8,7 @@ import type { ConverseApi } from './types';
 interface ConverseConfig {
   model: string;
   systemPrompt: string;
+  permissionMode: string;
 }
 
 export function createConverseApi(
@@ -37,6 +38,7 @@ export function createConverseApi(
             ...getConfig && {
               model: getConfig().model,
               system_prompt: getConfig().systemPrompt,
+              permission_mode: getConfig().permissionMode,
             },
           }),
           signal: controller.signal,

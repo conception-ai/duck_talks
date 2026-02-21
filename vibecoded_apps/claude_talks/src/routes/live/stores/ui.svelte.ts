@@ -6,7 +6,7 @@
  */
 
 import type { InteractionMode } from '../types';
-import { DEFAULT_MODEL, DEFAULT_SYSTEM_PROMPT } from '../defaults';
+import { DEFAULT_MODEL, DEFAULT_PERMISSION_MODE, DEFAULT_SYSTEM_PROMPT } from '../defaults';
 
 const STORAGE_KEY = 'claude-talks:ui';
 
@@ -16,6 +16,7 @@ interface Persisted {
   mode: InteractionMode;
   model: string;
   systemPrompt: string;
+  permissionMode: string;
 }
 
 const DEFAULTS: Persisted = {
@@ -24,6 +25,7 @@ const DEFAULTS: Persisted = {
   mode: 'direct',
   model: DEFAULT_MODEL,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  permissionMode: DEFAULT_PERMISSION_MODE,
 };
 
 function load(): Persisted {
@@ -52,9 +54,10 @@ export function createUIStore() {
   let mode = $state<InteractionMode>(persisted.mode);
   let model = $state(persisted.model);
   let systemPrompt = $state(persisted.systemPrompt);
+  let permissionMode = $state(persisted.permissionMode);
 
   function persist() {
-    save({ voiceEnabled, apiKey, mode, model, systemPrompt });
+    save({ voiceEnabled, apiKey, mode, model, systemPrompt, permissionMode });
   }
 
   function toggleVoice() {
@@ -86,5 +89,11 @@ export function createUIStore() {
     setModel(m: string) { model = m; persist(); },
     setSystemPrompt(p: string) { systemPrompt = p; persist(); },
     resetSystemPrompt() { systemPrompt = DEFAULT_SYSTEM_PROMPT; persist(); },
+    get permissionMode() { return permissionMode; },
+    setPermissionMode(m: string) { permissionMode = m; persist(); },
+    cyclePermissionMode() {
+      permissionMode = permissionMode === 'plan' ? 'acceptEdits' : 'plan';
+      persist();
+    },
   };
 }

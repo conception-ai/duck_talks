@@ -4,7 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
-from typing import cast
+from typing import Literal, cast
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -16,6 +16,8 @@ from claude_agent_sdk import (
     query,
 )
 from claude_agent_sdk.types import StreamEvent
+
+type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 
 log = logging.getLogger("claude")
 
@@ -79,13 +81,14 @@ class Claude:
         model: str,
         system_prompt: str,
         session_id: str | None = None,
+        permission_mode: PermissionMode = "plan",
     ) -> AsyncIterator[Chunk]:
         options = ClaudeAgentOptions(
             model=model,
             cwd=self._cwd,
             system_prompt=system_prompt,
             include_partial_messages=True,
-            permission_mode="acceptEdits",
+            permission_mode=permission_mode,
             stderr=self._stderr,
         )
         if session_id:
