@@ -30,6 +30,7 @@ export type ContentBlock =
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
 
 export interface Message {
+  uuid?: string;
   role: 'user' | 'assistant';
   content: string | ContentBlock[];
 }
@@ -129,6 +130,7 @@ export interface LiveBackend {
 export interface ConverseApi {
   sessionId: string | null;
   sessionStart: number;
+  leafUuid: string | null;
   stream(
     instruction: string,
     callbacks: {

@@ -512,6 +512,35 @@ class Session(BaseModel):
         return file_path
 
 
+def fork_session(original_path: str, leaf_uuid: str) -> str:
+    """Create a new session JSONL forked at leaf_uuid. Returns new session_id.
+
+    The CLI ignores SummaryEntry.leafUuid — it always resumes from the deepest
+    leaf.  So the only way to "rewind" is to create a fresh JSONL containing
+    only the path entries up to leaf_uuid.
+    """
+    import os
+
+    conv = Conversation.from_jsonl(original_path)
+    path_entries = conv.walk_path(leaf_uuid)
+    if not path_entries:
+        raise ValueError(f"UUID not found in tree: {leaf_uuid}")
+    path_entries.reverse()  # walk_path returns leaf→root; we need root→leaf
+
+    new_sid = str(uuid.uuid4())
+    new_path = os.path.join(os.path.dirname(original_path), f"{new_sid}.jsonl")
+
+    with open(new_path, "w") as f:
+        qop = QueueOperation(sessionId=new_sid)
+        _ = f.write(qop.to_jsonl_line() + "\n")
+        for entry in path_entries:
+            raw = cast(dict[str, object], json.loads(entry.to_jsonl_line()))
+            raw["sessionId"] = new_sid
+            _ = f.write(json.dumps(raw) + "\n")
+
+    return new_sid
+
+
 # --- Read-Only Conversation Loader ---
 
 
@@ -615,13 +644,7 @@ class Conversation(BaseModel):
 
     @property
     def active_leaf(self) -> TreeEntry | None:
-        """Tip of the active branch: last summary's leafUuid, else deepest leaf."""
-        t = self._tree
-        # Check summaries first
-        for r in reversed(self.records):
-            if isinstance(r, SummaryEntry) and r.leafUuid and r.leafUuid in t.by_uuid:
-                return t.by_uuid[r.leafUuid][-1]
-        # Fall back to deepest leaf
+        """Tip of the active branch (deepest leaf in the tree)."""
         all_leaves = self.leaves
         if not all_leaves:
             return None

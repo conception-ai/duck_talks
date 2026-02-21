@@ -28,6 +28,7 @@ export function createConverseApi(
 ): ConverseApi {
   let sessionId: string | null = null;
   let sessionStart: number = Date.now();
+  let leafUuid: string | null = null;
   let controller: AbortController | null = null;
 
   return {
@@ -35,6 +36,8 @@ export function createConverseApi(
     set sessionId(id: string | null) { sessionId = id; },
     get sessionStart() { return sessionStart; },
     set sessionStart(t: number) { sessionStart = t; },
+    get leafUuid() { return leafUuid; },
+    set leafUuid(id: string | null) { leafUuid = id; },
 
     abort() { controller?.abort(); controller = null; },
 
@@ -50,6 +53,7 @@ export function createConverseApi(
           body: JSON.stringify({
             instruction,
             session_id: sessionId,
+            leaf_uuid: leafUuid,
             ...getConfig && {
               model: getConfig().model,
               system_prompt: getConfig().systemPrompt,
@@ -97,6 +101,7 @@ export function createConverseApi(
             }
             if (data.done) {
               if (data.session_id) sessionId = data.session_id;
+              leafUuid = null;
               console.log(
                 `%c CLAUDE %c ${ts()} done: ${nChunks} chunks, cost=$${data.cost_usd}`,
                 ORANGE_BADGE, DIM,

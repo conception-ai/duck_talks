@@ -225,31 +225,28 @@ export function createDataStore(deps: DataStoreDeps) {
   function loadHistory(msgs: Message[], sessionId: string) {
     messages = msgs;
     api.sessionId = sessionId;
+    api.leafUuid = null;
   }
 
-  async function back() {
-    const sid = api.sessionId;
-    if (!sid) return;
-
-    // Abort in-flight converse stream
+  function rewindTo(messageIndex: number) {
+    if (messageIndex < 1) return;
+    const leaf = messages[messageIndex - 1];
+    if (!leaf?.uuid) return;
     api.abort();
-
-    // Clear all pending state FIRST — prevents finishTool() from
-    // committing partial results when the async abort error fires
     pendingTool = null;
     pendingOutput = '';
     pendingApproval = null;
     pendingCancel?.();
     pendingCancel = null;
     pendingExecute = null;
+    messages = messages.slice(0, messageIndex);
+    api.leafUuid = leaf.uuid;
+  }
 
-    // Persist rewind to backend
-    const res = await fetch(`/api/sessions/${sid}/back`, { method: 'POST' });
-    if (!res.ok) return;
-
-    // Pop last round from messages[]
-    while (messages.length && messages.at(-1)?.role === 'assistant') messages.pop();
-    while (messages.length && messages.at(-1)?.role === 'user') messages.pop();
+  async function back() {
+    for (let i = messages.length - 1; i >= 1; i--) {
+      if (messages[i].role === 'user') { rewindTo(i); return; }
+    }
   }
 
   const dataMethods = {
@@ -331,6 +328,7 @@ export function createDataStore(deps: DataStoreDeps) {
     get claudeSessionId() { return api.sessionId; },
     setClaudeSession(id: string | null) { api.sessionId = id; },
     loadHistory,
+    rewindTo,
     back,
     approve,
     reject,

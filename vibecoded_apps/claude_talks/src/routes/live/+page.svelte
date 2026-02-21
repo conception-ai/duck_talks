@@ -96,6 +96,25 @@
       .map((b) => b.thinking);
   }
 
+  // --- Tool result pairing ---
+  function buildToolResultMap(msgs: Message[]): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const msg of msgs) {
+      if (typeof msg.content === 'string') continue;
+      for (const b of msg.content) {
+        if (b.type === 'tool_result') map.set(b.tool_use_id, b.content);
+      }
+    }
+    return map;
+  }
+
+  function isToolResultOnly(msg: Message): boolean {
+    if (msg.role !== 'user' || typeof msg.content === 'string') return false;
+    return msg.content.every((b) => b.type === 'tool_result');
+  }
+
+  let resultMap = $derived(buildToolResultMap(live.messages));
+
   // --- Settings modal state ---
   let settingsOpen = $state(!ui.apiKey);
   let keyDraft = $state(ui.apiKey ?? '');
@@ -228,43 +247,42 @@
   <div class="scroll-area" bind:this={messagesEl}>
   <div class="messages">
     {#each live.messages as msg, i}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="msg {msg.role}"
-           onmouseenter={() => hoveredMsg = i}
-           onmouseleave={() => hoveredMsg = null}>
-        {#if hoveredMsg === i && msg.role === 'user' && i >= 2 && msg.uuid}
-          <button class="rewind-btn" onclick={() => live.rewindTo(i)}>Rewind</button>
-        {/if}
-        {#if messageText(msg)}
-          {#if msg.role === 'assistant'}
-            <div class="markdown">{@html marked.parse(messageText(msg))}</div>
-          {:else}
-            <p>{messageText(msg)}</p>
+      {#if !isToolResultOnly(msg)}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="msg {msg.role}"
+             onmouseenter={() => hoveredMsg = i}
+             onmouseleave={() => hoveredMsg = null}>
+          {#if hoveredMsg === i && i > 0 && msg.uuid}
+            <button class="rewind-btn" onclick={() => live.rewindTo(i)}>Rewind</button>
           {/if}
-        {/if}
-        {#each messageThinking(msg) as think}
-          <details class="thinking">
-            <summary>Thinking...</summary>
-            <p>{think}</p>
-          </details>
-        {/each}
-        {#each messageToolUses(msg) as tool}
-          <div class="tool-result">
-            <span class="tool-pill">{tool.name}</span>
-            {#if tool.input.instruction}
-              <p class="tool-args">{tool.input.instruction}</p>
-            {:else if Object.keys(tool.input).length}
-              <p class="tool-args">{JSON.stringify(tool.input)}</p>
+          {#if messageText(msg)}
+            {#if msg.role === 'assistant'}
+              <div class="markdown">{@html marked.parse(messageText(msg))}</div>
+            {:else}
+              <p>{messageText(msg)}</p>
             {/if}
-          </div>
-        {/each}
-        {#each messageToolResults(msg) as result}
-          <details class="tool-result">
-            <summary>Tool result</summary>
-            <p class="tool-text">{result.content}</p>
-          </details>
-        {/each}
-      </div>
+          {/if}
+          {#each messageThinking(msg) as think}
+            <details class="thinking">
+              <summary>Thinking...</summary>
+              <p>{think}</p>
+            </details>
+          {/each}
+          {#each messageToolUses(msg) as tool}
+            <details class="tool-use">
+              <summary><span class="tool-pill">{tool.name}</span></summary>
+              {#if tool.input.instruction}
+                <p class="tool-args">{tool.input.instruction}</p>
+              {:else if Object.keys(tool.input).length}
+                <p class="tool-args">{JSON.stringify(tool.input)}</p>
+              {/if}
+              {#if resultMap.get(tool.id)}
+                <p class="tool-text">{resultMap.get(tool.id)}</p>
+              {/if}
+            </details>
+          {/each}
+        </div>
+      {/if}
     {/each}
 
     <!-- Pending: live transcription -->
@@ -639,6 +657,9 @@
   .msg.user {
     align-self: flex-end;
     text-align: right;
+    background: #f3f4f6;
+    padding: 0.5rem 0.75rem;
+    border-radius: 1rem;
   }
 
   .msg.assistant {
@@ -662,16 +683,33 @@
     overflow-y: auto;
   }
 
-  .tool-result {
-    margin-top: 0.5rem;
-    padding: 0.5rem;
-    border-radius: 0.375rem;
-    background: #f5f0ff;
-    border: 1px solid #e4d9fc;
+  .tool-use {
+    margin-top: 0.25rem;
+    padding: 0;
+    border: none;
+    background: none;
+  }
+
+  .tool-use summary {
+    list-style: none;
+    cursor: pointer;
+    display: inline-block;
+  }
+
+  .tool-use summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-use .tool-args {
+    padding: 0.4rem 0.6rem;
+    margin-top: 0.25rem;
+    background: #f9fafb;
+    border-radius: 0.25rem;
+    border: 1px solid #e5e7eb;
   }
 
   .tool-result {
-    margin-top: 0.5rem;
+    margin-top: 0.25rem;
     padding: 0.5rem;
     border-radius: 0.375rem;
     background: #f5f0ff;
@@ -696,9 +734,9 @@
   }
 
   .tool-text {
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     white-space: pre-wrap;
-    max-height: 300px;
+    max-height: 200px;
     overflow-y: auto;
     color: #374151;
   }

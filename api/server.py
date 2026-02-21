@@ -14,7 +14,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from claude_client import Claude, ContentBlockChunk, TextDelta
-from models import AssistantEntry, Conversation, UserEntry, preview
+from models import AssistantEntry, Conversation, UserEntry, preview, fork_session
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("api")
@@ -158,6 +158,7 @@ def get_path(
 
 
 class MessageResponse(BaseModel):
+    uuid: str
     role: str
     content: str | list[dict[str, object]]
 
@@ -178,6 +179,7 @@ def get_messages(session_id: str) -> list[MessageResponse]:
         if isinstance(entry, UserEntry):
             messages.append(
                 MessageResponse(
+                    uuid=entry.uuid,
                     role="user",
                     content=entry.message.content,
                 )
@@ -186,7 +188,9 @@ def get_messages(session_id: str) -> list[MessageResponse]:
             blocks: list[dict[str, object]] = [
                 block.model_dump(exclude_none=True) for block in entry.message.content
             ]
-            messages.append(MessageResponse(role="assistant", content=blocks))
+            messages.append(
+                MessageResponse(uuid=entry.uuid, role="assistant", content=blocks)
+            )
     return messages
 
 
@@ -197,6 +201,7 @@ def _sse(data: dict[str, object]) -> str:
 class ConverseRequest(BaseModel):
     instruction: str
     session_id: str | None = None
+    leaf_uuid: str | None = None
     model: str
     system_prompt: str
     permission_mode: Literal["default", "acceptEdits", "plan", "bypassPermissions"] = (
@@ -213,11 +218,23 @@ async def converse(body: ConverseRequest) -> StreamingResponse:
         len(body.system_prompt),
     )
 
+    session_id = body.session_id
+    if body.leaf_uuid and body.session_id:
+        path = _PROJECT_DIR / f"{body.session_id}.jsonl"
+        if path.is_file():
+            session_id = fork_session(str(path), body.leaf_uuid)
+            log.info(
+                "forked session %s → %s at leaf %s",
+                body.session_id,
+                session_id,
+                body.leaf_uuid,
+            )
+
     async def stream():  # noqa: ANN202
         n_chunks = 0
         async for chunk in claude.converse(
             body.instruction,
-            session_id=body.session_id,
+            session_id=session_id,
             model=body.model,
             system_prompt=body.system_prompt,
             permission_mode=body.permission_mode,
