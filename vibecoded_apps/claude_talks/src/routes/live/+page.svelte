@@ -5,14 +5,14 @@
   import { createDataStore } from './stores/data.svelte';
   import { createUIStore } from './stores/ui.svelte';
   import { createCorrectionsStore } from './stores/corrections.svelte';
-  import { startMic, createPlayer, playPcmChunks } from './audio';
+  import { startMic, playPcmChunks } from './audio';
   import { speak } from '../../lib/tts';
   import { createConverseApi } from './converse';
   import { correctInstruction } from './correct';
   import { DEFAULT_SYSTEM_PROMPT } from './defaults';
   import { createLLM } from '../../lib/llm';
   import { setup as setupRecorder } from '../../lib/recorder';
-  import type { AudioSink, ContentBlock, InteractionMode, Message, STTCorrection } from './types';
+  import type { ContentBlock, InteractionMode, Message, STTCorrection } from './types';
 
   setupRecorder();
 
@@ -22,17 +22,7 @@
   const corrections = createCorrectionsStore();
 
   const live = createDataStore({
-    audio: {
-      startMic,
-      createPlayer(): AudioSink {
-        const raw = createPlayer();
-        return {
-          play(b64: string) { if (ui.voiceEnabled) raw.play(b64); },
-          flush() { raw.flush(); },
-          stop() { raw.stop(); },
-        };
-      },
-    },
+    audio: { startMic },
     api: createConverseApi('/api/converse', () => ({
       model: ui.model,
       systemPrompt: ui.systemPrompt,
@@ -129,7 +119,6 @@
   // --- Settings modal state ---
   let settingsOpen = $state(!ui.apiKey);
   let keyDraft = $state(ui.apiKey ?? '');
-  let voiceDraft = $state(ui.voiceEnabled);
   let readbackDraft = $state(ui.readbackEnabled);
   let modeDraft = $state<InteractionMode>(ui.mode);
   let modelDraft = $state(ui.model);
@@ -138,7 +127,6 @@
 
   function openSettings() {
     keyDraft = ui.apiKey ?? '';
-    voiceDraft = ui.voiceEnabled;
     readbackDraft = ui.readbackEnabled;
     modeDraft = ui.mode;
     modelDraft = ui.model;
@@ -149,7 +137,6 @@
 
   function saveSettings() {
     if (keyDraft.trim()) ui.setApiKey(keyDraft);
-    if (voiceDraft !== ui.voiceEnabled) ui.toggleVoice();
     if (readbackDraft !== ui.readbackEnabled) ui.setReadbackEnabled(readbackDraft);
     ui.setMode(modeDraft);
     ui.setModel(modelDraft);
@@ -387,14 +374,6 @@
       <label>
         API Key
         <input type="password" placeholder="API key" bind:value={keyDraft} />
-      </label>
-
-      <label>
-        Voice Playback
-        <select bind:value={voiceDraft}>
-          <option value={true}>On</option>
-          <option value={false}>Off</option>
-        </select>
       </label>
 
       <label>

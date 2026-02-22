@@ -88,6 +88,14 @@ export interface DataStoreMethods {
   back(): Promise<void>;
 }
 
+// --- Port: Streaming TTS ---
+
+export interface StreamingTTS {
+  send(text: string): void;
+  finish(): void;
+  close(): void;
+}
+
 // --- Port: Audio ---
 
 export interface AudioSource {
@@ -102,7 +110,6 @@ export interface AudioSink {
 
 export interface AudioPort {
   startMic(onChunk: (base64: string) => void): Promise<AudioSource>;
-  createPlayer(): AudioSink;
 }
 
 // --- Port: Gemini session backend ---

@@ -11,7 +11,6 @@
 import { connectGemini } from '../gemini';
 import type {
   AudioPort,
-  AudioSink,
   AudioSource,
   ContentBlock,
   ConverseApi,
@@ -60,7 +59,6 @@ export function createDataStore(deps: DataStoreDeps) {
   // --- I/O handles (not reactive, not exposed) ---
   let backend: LiveBackend | null = null;
   let mic: AudioSource | null = null;
-  let player: AudioSink | null = null;
 
   // --- Mutation methods (passed to gemini.ts as DataStoreMethods) ---
 
@@ -277,10 +275,8 @@ export function createDataStore(deps: DataStoreDeps) {
     }
     sessionStart = Date.now();
     audioBuffer = [];
-    player = audio.createPlayer();
     backend = await connectGemini({
       data: dataMethods,
-      player,
       converseApi: api,
       tag: 'live',
       apiKey,
@@ -310,8 +306,6 @@ export function createDataStore(deps: DataStoreDeps) {
     api.abort();
     mic?.stop();
     mic = null;
-    player?.stop();
-    player = null;
     backend?.close();
     backend = null;
     status = 'idle';
