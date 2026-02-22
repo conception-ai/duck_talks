@@ -25,10 +25,9 @@ log = logging.getLogger("claude")
 # Pop it from the process so the child won't see it.
 _ = os.environ.pop("CLAUDECODE", None)
 
-# To run fully isolated (separate config/creds/sessions):
-#   npm install @anthropic-ai/claude-code --prefix ~/.claude-sdk/cli
-#   CLAUDECODE= CLAUDE_CONFIG_DIR=~/.claude-sdk ~/.claude-sdk/cli/node_modules/.bin/claude login
-# Then pass cli_path and env={"CLAUDE_CONFIG_DIR": ...} to ClaudeAgentOptions.
+_SDK_DIR = os.path.expanduser("~/.claude-sdk")
+_CLI_PATH = os.path.join(_SDK_DIR, "cli/node_modules/.bin/claude")
+_SDK_ENV = {"CLAUDE_CONFIG_DIR": _SDK_DIR}
 
 
 @dataclass
@@ -91,6 +90,8 @@ class Claude:
             permission_mode=permission_mode,
             allowed_tools=["Read", "WebSearch"],
             disallowed_tools=["AskUserQuestion", "Skill"],
+            cli_path=_CLI_PATH,
+            env=_SDK_ENV,
             stderr=self._stderr,
         )
         if session_id:
