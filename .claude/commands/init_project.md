@@ -8,7 +8,6 @@ Your code must be clean, minimalist and easy to read.
 | File | Purpose |
 |------|---------|
 | @models.py | Session JSONL schema, `fork_session()` (rewind by creating truncated JSONL), `Conversation` loader |
-| watcher.py | File monitor |
 | @claude_client.py | Claude Code SDK wrapper (isolated subprocess) |
 | @api/server.py | FastAPI backend — SSE streaming, `GET /api/sessions/{id}/messages` (faithful content blocks), `POST /api/converse` (forks session on `leaf_uuid` for rewind) |
 | @vibecoded_apps/CLAUDE.md | Svelte app conventions |
