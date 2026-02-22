@@ -83,8 +83,8 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   let closed = false; // hoisted so onclose callback can reach it
   let isRelaying = false; // true while Claude chunks are flowing to Gemini
   let approvalPending = false; // true during BLOCKING approval hold — gates sendRealtimeInput
-  let relayUnfreezeT0 = 0; // timestamp when tool response unfreezes Gemini
-  let relayTTFTLogged = false; // only log TTFT once per converse
+  let audioChunksInTurn = 0; // count audio chunks in current turn for envelope logging
+  let audioTurnT0 = 0; // timestamp of first audio chunk in current turn
   let userSpokeInTurn = false;
   const t0 = Date.now();
   const ts = () => {
@@ -135,6 +135,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
 
             // Phase 2 buffer: after tool response, feeds sendClientContent
             const geminiBuffer = createChunkBuffer((text) => {
+              console.log(`%c GEMINI %c ${ts()} ← sendClientContent (${text.length} chars): ${text}`, BLUE_BADGE, DIM);
               sessionRef?.sendClientContent({
                 turns: [{ role: 'user', parts: [{ text: `[CLAUDE]: ${text}` }] }],
                 turnComplete: true,
@@ -146,9 +147,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
               if (toolResponseSent) return;
               toolResponseSent = true;
               if (bufferTimer) { clearTimeout(bufferTimer); bufferTimer = undefined; }
-              console.log(`%c GEMINI %c ${ts()} unfreezing with ${initialBuffer.length} chars`, BLUE_BADGE, DIM);
-              relayUnfreezeT0 = Date.now();
-              relayTTFTLogged = false;
+              console.log(`%c GEMINI %c ${ts()} ← toolResponse (${initialBuffer.length} chars): ${initialBuffer}`, BLUE_BADGE, DIM);
               sessionRef?.sendToolResponse({
                 functionResponses: [{
                   id: fc.id, name: 'converse',
@@ -275,6 +274,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
 
     if (sc.interrupted) {
       console.log(`%c GEMINI %c ${ts()} interrupted`, BLUE_BADGE, DIM);
+      audioChunksInTurn = 0;
       userSpokeInTurn = false;
       player.flush();
       data.commitTurn();
@@ -300,17 +300,22 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     if (sc.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {
         if (part.inlineData?.data) {
-          if (isRelaying && relayUnfreezeT0 && !relayTTFTLogged) {
-            console.log(`%c GEMINI %c ${ts()} relay TTFT: ${Date.now() - relayUnfreezeT0}ms`, BLUE_BADGE, DIM);
-            relayTTFTLogged = true;
+          if (audioChunksInTurn === 0) {
+            audioTurnT0 = Date.now();
+            console.log(`%c GEMINI %c ${ts()} 🔊 audio start${isRelaying ? ' (relay)' : ''}`, BLUE_BADGE, DIM);
           }
+          audioChunksInTurn++;
           player.play(part.inlineData.data);
         }
       }
     }
 
     if (sc.turnComplete) {
-      console.log(`%c GEMINI %c ${ts()} done`, BLUE_BADGE, DIM);
+      const audioInfo = audioChunksInTurn > 0
+        ? ` (${audioChunksInTurn} audio chunks, ${((Date.now() - audioTurnT0) / 1000).toFixed(1)}s)`
+        : '';
+      console.log(`%c GEMINI %c ${ts()} done${audioInfo}`, BLUE_BADGE, DIM);
+      audioChunksInTurn = 0;
       data.commitTurn();
 
       // Nudge: Gemini completed without calling converse after user spoke
