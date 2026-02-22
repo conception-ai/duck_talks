@@ -32,6 +32,7 @@ import {
 } from '@google/genai';
 import { createChunkBuffer } from './buffer';
 import { TOOLS, handleToolCall } from './tools';
+import { startVoiceApproval } from './voice-approval';
 import type { AudioSink, ConverseApi, DataStoreMethods, InteractionMode, LiveBackend } from './types';
 
 // --- Log styles ---
@@ -81,6 +82,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   let sessionRef: Session | null = null;
   let closed = false; // hoisted so onclose callback can reach it
   let isRelaying = false; // true while Claude chunks are flowing to Gemini
+  let approvalPending = false; // true during BLOCKING approval hold — gates sendRealtimeInput
   let relayUnfreezeT0 = 0; // timestamp when tool response unfreezes Gemini
   let relayTTFTLogged = false; // only log TTFT once per converse
   let userSpokeInTurn = false;
@@ -193,39 +195,65 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             });
           };
 
+          // Hold for approval with voice + UI. Starts voice listener,
+          // gates mic audio away from frozen Gemini, cleans up on resolve.
+          const holdWithVoice = (
+            approvalPayload: Parameters<typeof data.holdForApproval>[0],
+            stopReadback: () => void,
+          ) => {
+            approvalPending = true;
+            let resolved = false;
+            let stopVoice: (() => void) | null = null;
+
+            const onAccept = (approved: string) => {
+              if (resolved) return;
+              resolved = true;
+              stopVoice?.();
+              stopReadback();
+              approvalPending = false;
+              executeConverse(approved);
+            };
+            const onCancel = () => {
+              if (resolved) return;
+              resolved = true;
+              stopVoice?.();
+              stopReadback();
+              approvalPending = false;
+              rejectAndUnfreeze();
+            };
+
+            // Voice triggers same store methods the UI buttons use.
+            // approve() → store pendingExecute → onAccept
+            // reject() → store pendingCancel → onCancel
+            stopVoice = startVoiceApproval(
+              () => data.approve(),
+              () => data.reject(),
+            );
+
+            data.holdForApproval(approvalPayload, onAccept, onCancel);
+          };
+
           if (mode === 'direct') {
             executeConverse(instruction);
           } else if (mode === 'correct') {
-            // LLM auto-corrects, then hold for approval
             console.log(`${ts()} correct mode: running LLM correction`);
             deps.correctInstruction(instruction).then(
               (corrected) => {
                 const stopReadback = deps.readbackInstruction(corrected);
-                data.holdForApproval(
+                holdWithVoice(
                   { rawInstruction: instruction, instruction: corrected, audioChunks },
-                  (approved) => { stopReadback(); executeConverse(approved); },
-                  () => { stopReadback(); rejectAndUnfreeze(); },
+                  stopReadback,
                 );
               },
               () => {
-                // Fallback: show uncorrected on LLM error
                 const stopReadback = deps.readbackInstruction(instruction);
-                data.holdForApproval(
-                  { instruction, audioChunks },
-                  (approved) => { stopReadback(); executeConverse(approved); },
-                  () => { stopReadback(); rejectAndUnfreeze(); },
-                );
+                holdWithVoice({ instruction, audioChunks }, stopReadback);
               },
             );
           } else {
-            // review mode
             console.log(`${ts()} review mode: holding for approval`);
             const stopReadback = deps.readbackInstruction(instruction);
-            data.holdForApproval(
-              { instruction, audioChunks },
-              (approved) => { stopReadback(); executeConverse(approved); },
-              () => { stopReadback(); rejectAndUnfreeze(); },
-            );
+            holdWithVoice({ instruction, audioChunks }, stopReadback);
           }
           continue;
         }
@@ -339,7 +367,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     );
 
     return {
-      sendRealtimeInput: (input) => { if (!closed) session.sendRealtimeInput(input); },
+      sendRealtimeInput: (input) => { if (!closed && !approvalPending) session.sendRealtimeInput(input); },
       sendClientContent: (content) => { if (!closed) session.sendClientContent(content); },
       sendToolResponse: (response) => { if (!closed) session.sendToolResponse(response as LiveSendToolResponseParameters); },
       close: () => { closed = true; sessionRef = null; session.close(); },

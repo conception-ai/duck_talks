@@ -263,6 +263,7 @@ export function createDataStore(deps: DataStoreDeps) {
     snapshotUtterance,
     holdForApproval,
     approve,
+    reject,
     back,
   };
 

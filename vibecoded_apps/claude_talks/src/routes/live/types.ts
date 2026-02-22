@@ -84,6 +84,7 @@ export interface DataStoreMethods {
     cancel?: () => void,
   ): void;
   approve(editedText?: string): void;
+  reject(): void;
   back(): Promise<void>;
 }
 
