@@ -1,14 +1,12 @@
 /**
  * Ephemeral Gemini Live session that acts as a streaming TTS pipe.
  * Fully self-contained: owns its own Gemini connection, sentence buffer,
- * queue-based sender, and audio player.
+ * and audio player.
  *
  * One instance per `converse` call. Opened when Claude starts streaming,
  * closed on done/error/interrupt.
  *
- * Queue-based sending: first sentence-buffer flush is sent immediately
- * with turnComplete:true. Subsequent flushes are queued and drained
- * one at a time on turnComplete — avoids mid-sentence cuts.
+ * Each sentence-buffer flush is sent directly to Gemini.
  */
 
 import {
@@ -31,52 +29,24 @@ export function openTTSSession(apiKey: string): StreamingTTS {
   const player = createPlayer();
   let session: Session | null = null;
   let closed = false;
-  let finishing = false; // set by finish() — close session when queue drains
-  let ttsIdle = true;
-  let firstSendT0 = 0; // timestamp of first sendClientContent — for TTFT
+  let finishing = false;
+  let speaking = false;
+  let firstSendT0 = 0;
   let ttftLogged = false;
-  const queue: string[] = [];
   const preConnectQueue: string[] = [];
 
-  function sendBatch(text: string) {
+  function sendText(text: string) {
     if (!session || closed) return;
-    if (ttsIdle) {
-      ttsIdle = false;
-      if (!firstSendT0) firstSendT0 = performance.now();
-      console.log(`%c TTS %c → send: ${text}`, GREEN_BADGE, DIM);
-      session.sendClientContent({
-        turns: [{ role: 'user', parts: [{ text }] }],
-        turnComplete: true,
-      });
-    } else {
-      console.log(`%c TTS %c → queue: ${text}`, GREEN_BADGE, DIM);
-      queue.push(text);
-    }
+    if (!firstSendT0) firstSendT0 = performance.now();
+    speaking = true;
+    console.log(`%c TTS %c → ${text}`, GREEN_BADGE, DIM);
+    session.sendClientContent({
+      turns: [{ role: 'user', parts: [{ text }] }],
+      turnComplete: true,
+    });
   }
 
-  function drainQueue() {
-    if (queue.length > 0) {
-      // Join all queued text into one batch — avoids 1.5s gaps between sentences
-      const all = queue.join(' ');
-      queue.length = 0;
-      ttsIdle = false;
-      console.log(`%c TTS %c → drain: ${all}`, GREEN_BADGE, DIM);
-      session?.sendClientContent({
-        turns: [{ role: 'user', parts: [{ text: all }] }],
-        turnComplete: true,
-      });
-    } else if (finishing) {
-      // All text spoken, close cleanly
-      console.log(`%c TTS %c done — closing`, GREEN_BADGE, DIM);
-      session?.close();
-      player.stop();
-    } else {
-      ttsIdle = true;
-    }
-  }
-
-  // Sentence buffer → queue-based sender
-  const sentenceBuf = createSentenceBuffer(sendBatch);
+  const sentenceBuf = createSentenceBuffer(sendText);
 
   // Connect async — buffer text until ready
   const ai = new GoogleGenAI({ apiKey });
@@ -103,7 +73,12 @@ export function openTTSSession(apiKey: string): StreamingTTS {
           }
         }
         if (msg.serverContent?.turnComplete) {
-          drainQueue();
+          speaking = false;
+          if (finishing) {
+            console.log(`%c TTS %c done — closing`, GREEN_BADGE, DIM);
+            session?.close();
+            player.stop();
+          }
         }
       },
       onerror: (e) => {
@@ -116,7 +91,6 @@ export function openTTSSession(apiKey: string): StreamingTTS {
   }).then((s) => {
     if (closed) { s.close(); return; }
     session = s;
-    // Drain any text that arrived before connection was ready
     for (const text of preConnectQueue) sentenceBuf.push(text);
     preConnectQueue.length = 0;
   });
@@ -134,20 +108,17 @@ export function openTTSSession(apiKey: string): StreamingTTS {
       if (closed) return;
       sentenceBuf.flush();
       finishing = true;
-      // If nothing is playing/queued, close immediately
-      if (ttsIdle && queue.length === 0) {
-        console.log(`%c TTS %c finish (nothing queued) — closing`, GREEN_BADGE, DIM);
+      if (!speaking) {
+        console.log(`%c TTS %c finish (not speaking) — closing`, GREEN_BADGE, DIM);
         closed = true;
         session?.close();
         player.stop();
       }
-      // Otherwise drainQueue will close when queue empties
     },
     close() {
       closed = true;
       finishing = false;
       sentenceBuf.clear();
-      queue.length = 0;
       player.flush();
       player.stop();
       session?.close();
