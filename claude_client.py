@@ -21,13 +21,40 @@ type PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissio
 
 log = logging.getLogger("claude")
 
-# The SDK subprocess inherits os.environ and checks CLAUDECODE.
-# Pop it from the process so the child won't see it.
-_ = os.environ.pop("CLAUDECODE", None)
+# ── SDK Isolation (DO NOT REMOVE) ─────────────────────────────────────────────
+#
+# The Claude Agent SDK spawns a `claude` subprocess. When THIS process is itself
+# running inside Claude Code, three isolation layers prevent conflicts:
+#
+# 1. Pop CLAUDECODE env var — without this the child detects a "nested session"
+#    and refuses to start.
+#
+# 2. cli_path → separate binary installed under ~/.claude-sdk/cli/ so the child
+#    doesn't collide with the parent Claude Code instance.
+#    One-time setup:
+#      npm install @anthropic-ai/claude-code --prefix ~/.claude-sdk/cli
+#
+# 3. env with CLAUDE_CONFIG_DIR → separate config/creds/sessions directory.
+#    One-time setup:
+#      CLAUDECODE= CLAUDE_CONFIG_DIR=~/.claude-sdk \
+#        ~/.claude-sdk/cli/node_modules/.bin/claude login
+#
+# 4. PATH must include /opt/homebrew/bin (or wherever `node` lives) because the
+#    CLI shebang is #!/usr/bin/env node. The SDK's `env` parameter REPLACES the
+#    subprocess environment, so without explicitly passing PATH, node is not found
+#    (exit code 127). We merge os.environ + our overrides to preserve PATH.
+#
+# ──────────────────────────────────────────────────────────────────────────────
+
+_ = os.environ.pop("CLAUDECODE", None)  # Layer 1: prevent nested session error
 
 _SDK_DIR = os.path.expanduser("~/.claude-sdk")
-_CLI_PATH = os.path.join(_SDK_DIR, "cli/node_modules/.bin/claude")
-_SDK_ENV = {"CLAUDE_CONFIG_DIR": _SDK_DIR}
+_CLI_PATH = os.path.join(_SDK_DIR, "cli/node_modules/.bin/claude")  # Layer 2
+_SDK_ENV = {  # Layers 3 + 4
+    **os.environ,
+    "CLAUDE_CONFIG_DIR": _SDK_DIR,
+    "PATH": f"/opt/homebrew/bin:{os.environ.get('PATH', '')}",
+}
 
 
 @dataclass
