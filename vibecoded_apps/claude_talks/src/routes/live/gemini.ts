@@ -29,7 +29,7 @@ import {
 import { TOOLS, handleToolCall } from './tools';
 import { openTTSSession } from './tts-session';
 import { startVoiceApproval } from './voice-approval';
-import type { ConverseApi, DataStoreMethods, InteractionMode, LiveBackend, StreamingTTS } from './types';
+import type { ConverseApi, DataStoreMethods, InteractionMode, LiveBackend } from './types';
 
 // --- Log styles ---
 const BLUE_BADGE = 'background:#2563eb;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
@@ -73,7 +73,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   let sessionRef: Session | null = null;
   let closed = false; // hoisted so onclose callback can reach it
   let approvalPending = false; // true during BLOCKING approval hold — gates sendRealtimeInput
-  let activeTTS: StreamingTTS | null = null; // current TTS session (if any)
+  let activeConverse: { abort: () => void } | null = null; // Claude SSE + Inner Gemini TTS bundle
   let userSpokeInTurn = false;
   const t0 = Date.now();
   const ts = () => {
@@ -112,33 +112,51 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             });
           };
 
-          // Streams Claude's response via SSE. TTS session handles audio.
+          // Streams Claude's response via SSE. Inner Gemini TTS handles audio.
+          // Both lifecycles are bundled into activeConverse so any user speech
+          // can tear down both at once via abort().
           const executeConverse = (approvedInstruction: string) => {
-            // Unfreeze Gemini immediately — TTS handles audio separately
+            activeConverse?.abort(); // safety: close any previous
+
+            // Unfreeze Outer Gemini immediately — Inner Gemini handles audio separately
             sessionRef?.sendToolResponse({
               functionResponses: [{ id: fc.id, name: 'converse', response: { result: 'done' } }],
             });
 
             const tts = openTTSSession(apiKey);
-            activeTTS = tts;
+            let aborted = false;
+            let claudeDone = false;
+
+            const abort = () => {
+              if (aborted) return;
+              aborted = true;
+              converseApi.abort();
+              tts.close();
+              if (!claudeDone) data.finishTool();
+              activeConverse = null;
+            };
+            activeConverse = { abort };
 
             converseApi.stream(approvedInstruction, {
               onChunk(text) {
+                if (aborted) return;
                 data.appendTool(text);
                 tts.send(text);
               },
               onBlock(block) {
+                if (aborted) return;
                 data.appendBlock(block);
               },
               onDone() {
+                if (aborted) return;
+                claudeDone = true;
                 tts.finish();
-                activeTTS = null;
                 data.finishTool();
+                // activeConverse stays alive — Inner Gemini may still be draining audio
               },
               onError(msg) {
-                tts.close();
-                activeTTS = null;
-                data.finishTool();
+                if (aborted) return;
+                abort();
                 data.pushError(msg);
               },
             });
@@ -221,18 +239,21 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     if (!sc) return;
 
     if (sc.interrupted) {
-      console.log(`%c GEMINI %c ${ts()} interrupted`, BLUE_BADGE, DIM);
+      console.log(`%c GEMINI %c ${ts()} interrupted (sc.interrupted)${activeConverse ? ' — aborting active converse' : ''}`, BLUE_BADGE, DIM);
       userSpokeInTurn = false;
-      activeTTS?.close();
-      activeTTS = null;
-      converseApi.abort();
+      activeConverse?.abort();
       data.commitTurn();
       return;
     }
 
-    // User speech — always pass through
+    // User speech — always pass through, and abort any active converse
     if (sc.inputTranscription?.text) {
-      console.log(`${ts()} [user] ${sc.inputTranscription.text}`);
+      if (activeConverse) {
+        console.log(`%c GEMINI %c ${ts()} user speech interrupted active converse (inputTranscription): "${sc.inputTranscription.text}"`, BLUE_BADGE, DIM);
+      } else {
+        console.log(`${ts()} [user] ${sc.inputTranscription.text}`);
+      }
+      activeConverse?.abort();
       data.appendInput(sc.inputTranscription.text);
       userSpokeInTurn = true;
     }
@@ -278,8 +299,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
           const wasExpected = closed; // user-initiated stop() already set this
           closed = true;
           sessionRef = null;
-          activeTTS?.close();
-          activeTTS = null;
+          activeConverse?.abort();
           console.log(`${ts()} closed: ${e.reason}`);
           data.setStatus('idle');
           if (!wasExpected && e.reason) {
@@ -300,7 +320,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       sendRealtimeInput: (input) => { if (!closed && !approvalPending) session.sendRealtimeInput(input); },
       sendClientContent: (content) => { if (!closed) session.sendClientContent(content); },
       sendToolResponse: (response) => { if (!closed) session.sendToolResponse(response as LiveSendToolResponseParameters); },
-      close: () => { closed = true; sessionRef = null; session.close(); },
+      close: () => { activeConverse?.abort(); closed = true; sessionRef = null; session.close(); },
     };
   } catch (e: unknown) {
     console.error(`${ts()} connect failed:`, e);
