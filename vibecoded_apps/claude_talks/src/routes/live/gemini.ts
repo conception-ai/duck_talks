@@ -11,51 +11,21 @@
  * 1. **serverContent** — STT transcriptions, model audio, turn boundaries
  * 2. **toolCall** — Gemini wants to invoke a declared function
  *
- * ## The converse tool (core complexity)
+ * ## The converse tool (BLOCKING)
  *
- * The `converse` tool is the bridge to Claude Code. When Gemini decides
- * the user wants something done, it calls `converse({ instruction })`.
- * The tool is declared as NON_BLOCKING so Gemini can speak an
- * acknowledgment ("Asking Claude") while we stream Claude's response
- * in the background.
+ * The `converse` tool is declared as BLOCKING so Gemini is frozen by the
+ * API during approval + Claude streaming startup. The tool response is
+ * deferred until ~1s of Claude text is buffered, then sent to unfreeze
+ * Gemini. Remaining chunks are relayed via sendClientContent.
  *
- * The response flow:
- *   1. Gemini says "Asking Claude" (audio + outputTranscription)
- *   2. Gemini emits toolCall → we send a SILENT tool response
- *   3. We stream Claude's answer via /api/converse (SSE)
- *   4. Each Claude chunk is fed back as sendClientContent([CLAUDE]: text)
- *   5. Gemini reads the [CLAUDE] text aloud → produces new model audio
- *
- * ## conversePhase — suppression state machine
- *
- * Problem: between steps 2-4 Gemini keeps emitting its own audio/text.
- * Without gating, this leaks into the UI (echo text, duplicate audio).
- *
- * ```
- * idle ──→ suppressing ──→ relaying ──→ idle
- *       (tool call)    (1st Claude   (stream
- *       + flush audio   chunk sent)   done)
- * ```
- *
- * | Phase       | Audio (modelTurn)     | outputTranscription    |
- * |-------------|-----------------------|------------------------|
- * | idle        | play                  | append to pendingOutput |
- * | suppressing | BLOCK (+ flush)       | BLOCK                  |
- * | relaying    | play (Gemini reads    | BLOCK ([CLAUDE]: echo  |
- * |             | Claude's text aloud)  | is noise; real text is |
- * |             |                       | in appendTool)         |
- *
- * inputTranscription (user speech) always passes through.
- *
- * In learning mode, the stream doesn't start until the user approves.
- * The phase stays `suppressing` the whole time — audio and text are
- * blocked while waiting. On reject, the cancel callback resets to idle.
+ * An `isRelaying` boolean suppresses outputTranscription (echo noise)
+ * while Claude chunks are flowing. Audio always plays — during BLOCKING
+ * Gemini produces no audio, and after unfreezing it reads Claude aloud.
  */
 
 import {
   GoogleGenAI,
   Modality,
-  FunctionResponseScheduling,
   type LiveSendToolResponseParameters,
   type Session,
   type LiveServerMessage,
@@ -110,11 +80,10 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   // Mutable ref — handleMessage closes over this, assigned after connect().
   let sessionRef: Session | null = null;
   let closed = false; // hoisted so onclose callback can reach it
-  // Converse phase: idle → suppressing (tool call) → relaying (1st Claude chunk) → idle (done)
-  let conversePhase: 'idle' | 'suppressing' | 'relaying' = 'idle';
+  let isRelaying = false; // true while Claude chunks are flowing to Gemini
+  let relayUnfreezeT0 = 0; // timestamp when tool response unfreezes Gemini
+  let relayTTFTLogged = false; // only log TTFT once per converse
   let userSpokeInTurn = false;
-  let geminiRelayT0 = 0;
-  let geminiRelayTTFTLogged = false;
   const t0 = Date.now();
   const ts = () => {
     const elapsed = (Date.now() - t0) / 1000;
@@ -135,43 +104,34 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       for (const fc of message.toolCall.functionCalls) {
         console.log(`%c GEMINI %c ${ts()} tool: ${fc.name}`, BLUE_BADGE, DIM, fc.args);
 
-        if (fc.name === 'accept_instruction') {
-          data.approve();
-          sessionRef?.sendToolResponse({
-            functionResponses: [{ id: fc.id, name: fc.name, response: { status: 'ok' } }],
-          });
-          continue;
-        }
-
         data.startTool(fc.name!, fc.args ?? {});
 
         if (fc.name === 'converse') {
-          // Enter suppressing: block all Gemini audio/text until Claude's
-          // first chunk arrives (see conversePhase doc at top of file).
-          conversePhase = 'suppressing';
-          player.flush(); // cancel queued "Asking Claude" audio remnants
-
-          // SILENT = Gemini won't wait for our text response before speaking.
-          // It can start its acknowledgment immediately.
-          sessionRef?.sendToolResponse({
-            functionResponses: [
-              {
-                id: fc.id,
-                name: fc.name,
-                response: { status: 'started' },
-                scheduling: FunctionResponseScheduling.SILENT,
-              },
-            ],
-          });
-
+          isRelaying = true;
           const instruction = String(
             (fc.args as Record<string, unknown>)?.instruction ?? '',
           );
 
-          // Called immediately (normal mode) or after user approval (learning mode).
-          // Streams Claude's response via SSE and feeds each chunk back to Gemini
-          // so it reads the answer aloud.
+          // Shared rejection handler — unfreezes Gemini without executing
+          const rejectAndUnfreeze = () => {
+            sessionRef?.sendToolResponse({
+              functionResponses: [{
+                id: fc.id, name: 'converse',
+                response: { status: 'rejected' },
+              }],
+            });
+            isRelaying = false;
+          };
+
+          // Streams Claude's response via SSE. Defers the tool response
+          // until ~1s of text is buffered, then unfreezes Gemini with it.
+          // Remaining chunks are relayed via sendClientContent.
           const executeConverse = (approvedInstruction: string) => {
+            let toolResponseSent = false;
+            let initialBuffer = '';
+            let bufferTimer: ReturnType<typeof setTimeout> | undefined;
+
+            // Phase 2 buffer: after tool response, feeds sendClientContent
             const geminiBuffer = createChunkBuffer((text) => {
               sessionRef?.sendClientContent({
                 turns: [{ role: 'user', parts: [{ text: `[CLAUDE]: ${text}` }] }],
@@ -179,31 +139,54 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
               });
             }, 1000);
 
+            // Phase 1 → Phase 2 transition: send tool response to unfreeze
+            const flushAndUnfreeze = () => {
+              if (toolResponseSent) return;
+              toolResponseSent = true;
+              if (bufferTimer) { clearTimeout(bufferTimer); bufferTimer = undefined; }
+              console.log(`%c GEMINI %c ${ts()} unfreezing with ${initialBuffer.length} chars`, BLUE_BADGE, DIM);
+              relayUnfreezeT0 = Date.now();
+              relayTTFTLogged = false;
+              sessionRef?.sendToolResponse({
+                functionResponses: [{
+                  id: fc.id, name: 'converse',
+                  response: { result: initialBuffer || '...' },
+                }],
+              });
+            };
+
             converseApi.stream(approvedInstruction, {
               onChunk(text) {
-                data.appendTool(text);
+                data.appendTool(text); // UI always immediate
                 if (!sessionRef) {
                   console.error(`%c CLAUDE %c session is null, cannot send chunk`, ORANGE_BADGE, DIM);
                   return;
                 }
-                if (conversePhase === 'suppressing') {
-                  conversePhase = 'relaying';
-                  geminiRelayT0 = Date.now();
-                  geminiRelayTTFTLogged = false;
+
+                if (!toolResponseSent) {
+                  // Phase 1: accumulate for deferred tool response
+                  initialBuffer += text;
+                  if (!bufferTimer) {
+                    bufferTimer = setTimeout(flushAndUnfreeze, 1000);
+                  }
+                } else {
+                  // Phase 2: stream to Gemini via sendClientContent
+                  geminiBuffer.push(text);
                 }
-                geminiBuffer.push(text);
               },
               onBlock(block) {
                 data.appendBlock(block);
               },
               onDone() {
+                flushAndUnfreeze(); // if Claude finished within buffer window
                 geminiBuffer.flush();
-                conversePhase = 'idle';
+                isRelaying = false;
                 data.finishTool();
               },
               onError(msg) {
+                flushAndUnfreeze(); // unfreeze even on error
                 geminiBuffer.clear();
-                conversePhase = 'idle';
+                isRelaying = false;
                 data.finishTool();
                 data.pushError(msg);
               },
@@ -221,7 +204,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
                 data.holdForApproval(
                   { rawInstruction: instruction, instruction: corrected, audioChunks },
                   (approved) => { stopReadback(); executeConverse(approved); },
-                  () => { stopReadback(); conversePhase = 'idle'; },
+                  () => { stopReadback(); rejectAndUnfreeze(); },
                 );
               },
               () => {
@@ -230,7 +213,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
                 data.holdForApproval(
                   { instruction, audioChunks },
                   (approved) => { stopReadback(); executeConverse(approved); },
-                  () => { stopReadback(); conversePhase = 'idle'; },
+                  () => { stopReadback(); rejectAndUnfreeze(); },
                 );
               },
             );
@@ -241,7 +224,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
             data.holdForApproval(
               { instruction, audioChunks },
               (approved) => { stopReadback(); executeConverse(approved); },
-              () => { stopReadback(); conversePhase = 'idle'; },
+              () => { stopReadback(); rejectAndUnfreeze(); },
             );
           }
           continue;
@@ -277,24 +260,21 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       userSpokeInTurn = true;
     }
 
-    // Gemini's speech text. During converse this is either its own chatter
-    // or [CLAUDE]: echo text — both are noise (real text is in appendTool).
-    // "Asking Claude" arrives BEFORE the toolCall message, so it naturally
-    // passes through while conversePhase is still 'idle'.
-    if (sc.outputTranscription?.text && conversePhase === 'idle') {
+    // Gemini's speech text. During relay this is [CLAUDE]: echo — noise.
+    // Real Claude text is already in appendTool. Suppress during relay.
+    if (sc.outputTranscription?.text && !isRelaying) {
       console.log(`%c${sc.outputTranscription.text}`, BLUE_TEXT);
       data.appendOutput(sc.outputTranscription.text);
     }
 
-    // Gemini's audio output. During 'suppressing' this is residual audio
-    // from Gemini's own generation (pre-tool-call remnants). During
-    // 'relaying' this is Gemini reading Claude's text aloud — we want that.
+    // Gemini's audio output. Always play — during BLOCKING Gemini is frozen
+    // (no audio to suppress), after unfreezing it reads Claude aloud.
     if (sc.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {
-        if (part.inlineData?.data && conversePhase !== 'suppressing') {
-          if (conversePhase === 'relaying' && geminiRelayT0 && !geminiRelayTTFTLogged) {
-            console.log(`%c GEMINI %c ${ts()} relay TTFT: ${Date.now() - geminiRelayT0}ms`, BLUE_BADGE, DIM);
-            geminiRelayTTFTLogged = true;
+        if (part.inlineData?.data) {
+          if (isRelaying && relayUnfreezeT0 && !relayTTFTLogged) {
+            console.log(`%c GEMINI %c ${ts()} relay TTFT: ${Date.now() - relayUnfreezeT0}ms`, BLUE_BADGE, DIM);
+            relayTTFTLogged = true;
           }
           player.play(part.inlineData.data);
         }
@@ -306,7 +286,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       data.commitTurn();
 
       // Nudge: Gemini completed without calling converse after user spoke
-      if (userSpokeInTurn && conversePhase === 'idle') {
+      if (userSpokeInTurn && !isRelaying) {
         console.log(`${ts()} [nudge] no tool call after user speech`);
         sessionRef?.sendClientContent({
           turns: [{ role: 'user', parts: [{ text: 'You did not call the converse tool. Please call it now.' }] }],
@@ -341,7 +321,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
           const wasExpected = closed; // user-initiated stop() already set this
           closed = true;
           sessionRef = null;
-          conversePhase = 'idle';
+          isRelaying = false;
           console.log(`${ts()} closed: ${e.reason}`);
           data.setStatus('idle');
           if (!wasExpected && e.reason) {

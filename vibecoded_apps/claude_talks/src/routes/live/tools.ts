@@ -1,4 +1,4 @@
-import { Type, Behavior } from '@google/genai';
+import { Type } from '@google/genai';
 import type { Tool } from '@google/genai';
 
 // ── Gemini function declarations ──
@@ -7,13 +7,8 @@ export const TOOLS: Tool[] = [
   {
     functionDeclarations: [
       {
-        name: 'accept_instruction',
-        description: 'Accept the pending instruction for Claude Code. Call when the user confirms: "accept", "yes", "go ahead".',
-      },
-      {
         name: 'converse',
         description: 'Forward a user instruction to Claude Code for execution. Use this when the user wants Claude Code to do something.',
-        behavior: Behavior.NON_BLOCKING,
         parameters: {
           type: Type.OBJECT,
           properties: {
