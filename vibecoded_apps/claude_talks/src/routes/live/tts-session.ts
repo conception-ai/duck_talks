@@ -39,7 +39,7 @@ export function openTTSSession(apiKey: string): StreamingTTS {
     if (!session || closed) return;
     if (!firstSendT0) firstSendT0 = performance.now();
     speaking = true;
-    console.log(`%c TTS %c → ${text}`, GREEN_BADGE, DIM);
+    console.log(`%c TTS %c ← ${text}`, GREEN_BADGE, DIM);
     session.sendClientContent({
       turns: [{ role: 'user', parts: [{ text }] }],
       turnComplete: true,
@@ -55,6 +55,7 @@ export function openTTSSession(apiKey: string): StreamingTTS {
     config: {
       responseModalities: [Modality.AUDIO],
       systemInstruction: TTS_PROMPT,
+      outputAudioTranscription: {},
     },
     callbacks: {
       onopen: () => {
@@ -71,6 +72,9 @@ export function openTTSSession(apiKey: string): StreamingTTS {
               player.play(p.inlineData.data);
             }
           }
+        }
+        if (msg.serverContent?.outputTranscription?.text) {
+          console.log(`%c TTS %c → ${msg.serverContent.outputTranscription.text}`, GREEN_BADGE, DIM);
         }
         if (msg.serverContent?.turnComplete) {
           speaking = false;
