@@ -29,7 +29,7 @@ export function setup(): void {
     console.log('[test] already set up');
     return;
   }
-  const ctx = new AudioContext({ sampleRate: 24000 });
+  const ctx = new AudioContext({ sampleRate: 16000 });
   const dest = ctx.createMediaStreamDestination();
   const osc = ctx.createOscillator();
   osc.frequency.value = 0;
@@ -50,26 +50,55 @@ export function setup(): void {
   );
 }
 
-/** Push base64 PCM audio into the fake mic stream. */
-export function inject(base64pcm: string, sampleRate: number): void {
-  const ctx = WIN[CTX_KEY] as AudioContext | undefined;
-  const dest = WIN[DEST_KEY] as MediaStreamAudioDestinationNode | undefined;
-  if (!ctx || !dest) throw new Error('call setup() first');
-
+/** Decode base64 PCM (int16) to Float32Array. */
+function decodeBase64PCM(base64pcm: string): Float32Array {
   const binary = atob(base64pcm);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   const int16 = new Int16Array(bytes.buffer);
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768;
+  return float32;
+}
 
-  const buffer = ctx.createBuffer(1, float32.length, sampleRate);
+/** Resample audio to target rate using OfflineAudioContext. */
+async function resample(samples: Float32Array, fromRate: number, toRate: number): Promise<Float32Array> {
+  const duration = samples.length / fromRate;
+  const offCtx = new OfflineAudioContext(1, Math.ceil(duration * toRate), toRate);
+  const buf = offCtx.createBuffer(1, samples.length, fromRate);
+  buf.getChannelData(0).set(samples);
+  const src = offCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(offCtx.destination);
+  src.start();
+  const rendered = await offCtx.startRendering();
+  return rendered.getChannelData(0);
+}
+
+/**
+ * Push base64 PCM audio into the fake mic stream.
+ * Auto-resamples to 16kHz if sampleRate differs (e.g. 24kHz TTS output).
+ */
+export async function inject(base64pcm: string, sampleRate: number): Promise<void> {
+  const ctx = WIN[CTX_KEY] as AudioContext | undefined;
+  const dest = WIN[DEST_KEY] as MediaStreamAudioDestinationNode | undefined;
+  if (!ctx || !dest) throw new Error('call setup() first');
+
+  let float32 = decodeBase64PCM(base64pcm);
+  const targetRate = ctx.sampleRate; // 16000
+
+  if (sampleRate !== targetRate) {
+    console.log(`[test] resampling ${sampleRate}Hz → ${targetRate}Hz`);
+    float32 = await resample(float32, sampleRate, targetRate);
+  }
+
+  const buffer = ctx.createBuffer(1, float32.length, targetRate);
   buffer.getChannelData(0).set(float32);
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   source.connect(dest);
   source.start();
-  console.log(`[test] injected ${float32.length} samples at ${sampleRate}Hz (${(float32.length / sampleRate).toFixed(1)}s)`);
+  console.log(`[test] injected ${float32.length} samples at ${targetRate}Hz (${(float32.length / targetRate).toFixed(1)}s)`);
 }
 
 /** List available recordings from IndexedDB. */
@@ -86,6 +115,6 @@ export async function injectFromDB(index = 0): Promise<string> {
   const recordings = await getAllRecordings();
   const rec = recordings[index];
   if (!rec) throw new Error(`No recording at index ${index}`);
-  inject(combineChunks(rec.chunks), 16000);
+  await inject(combineChunks(rec.chunks), 16000);
   return rec.transcript;
 }
