@@ -4,6 +4,7 @@ import logging
 import os
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import Literal, cast
 
 from claude_agent_sdk import (
@@ -55,6 +56,27 @@ _SDK_ENV = {  # Layers 3 + 4
     "CLAUDE_CONFIG_DIR": _SDK_DIR,
     "PATH": f"/opt/homebrew/bin:{os.environ.get('PATH', '')}",
 }
+
+# ── Project paths ────────────────────────────────────────────────────────────
+
+_CWD = "/Users/dhuynh95/claude_talks"
+_PROJECT_SLUG = "-Users-dhuynh95-claude-talks"
+
+
+@dataclass(frozen=True)
+class ClaudeConfig:
+    """Paths for a Claude Code environment (CLI or SDK)."""
+
+    config_dir: str
+    cwd: str = _CWD
+
+    @property
+    def project_dir(self) -> Path:
+        return Path(self.config_dir) / "projects" / _PROJECT_SLUG
+
+
+REGULAR_CONFIG = ClaudeConfig(config_dir=os.path.expanduser("~/.claude"))
+ISOLATED_CONFIG = ClaudeConfig(config_dir=_SDK_DIR)
 
 
 @dataclass

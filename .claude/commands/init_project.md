@@ -10,7 +10,7 @@ Batch read them all in a single read. You must read context in a single turnÒ
 | File | Purpose |
 |------|---------|
 | @models.py | Session JSONL schema, `fork_session()` (rewind by creating truncated JSONL), `Conversation` loader |
-| @claude_client.py | Claude Code SDK wrapper (isolated subprocess) |
+| @claude_client.py | Claude Code SDK wrapper (isolated subprocess). `ClaudeConfig` dataclass (`REGULAR_CONFIG` → `~/.claude/`, `ISOLATED_CONFIG` → `~/.claude-sdk/`) — single source of truth for session paths. Server imports `ISOLATED_CONFIG` |
 | @api/server.py | FastAPI backend — SSE streaming, `GET /api/sessions/{id}/messages` (faithful content blocks), `POST /api/converse` (forks session on `leaf_uuid` for rewind) |
 | @vibecoded_apps/CLAUDE.md | Svelte app conventions |
 | @vibecoded_apps/claude_talks/src/routes/home/+page.svelte | Home page — session list, fetches `GET /api/sessions`, navigates to `/live/:id` |
@@ -88,6 +88,7 @@ Batch read them all in a single read. You must read context in a single turnÒ
   2. `cli_path` → `~/.claude-sdk/cli/node_modules/.bin/claude` — separate binary
   3. `env={"CLAUDE_CONFIG_DIR": "~/.claude-sdk"}` — separate config/creds
   4. `cwd` → temp dir — separate working directory
+- **Session path split** (`claude_client.py` → `server.py`): The SDK writes sessions under `~/.claude-sdk/projects/...` while the main CLI writes under `~/.claude/projects/...`. The backend MUST read from the same root the SDK writes to — currently `ISOLATED_CONFIG.project_dir`. Resuming a CLI-created session via the SDK **fails silently** (no output, no error — the SSE stream returns empty). If the home page lists sessions from one root but the SDK resumes from the other, resume is broken. `ClaudeConfig` ensures both derive from the same `config_dir`. The project slug uses hyphens (`-Users-dhuynh95-claude-talks`), not the filesystem's underscores — this is the CLI's own path sanitization, not a simple `replace("/", "-")`.
 - **SDK setup** (one-time): `npm install @anthropic-ai/claude-code --prefix ~/.claude-sdk/cli` then `CLAUDECODE= CLAUDE_CONFIG_DIR=~/.claude-sdk ~/.claude-sdk/cli/node_modules/.bin/claude login`
 - **SDK client lifetime**: `ClaudeSDKClient` goes stale after the first `receive_response()` — the second `query()` hangs forever. Use the standalone `query()` function instead, with `resume=session_id` (captured from `ResultMessage.session_id`) to maintain conversation across calls. Each call spawns a fresh subprocess but resumes the same session.
 - **SDK cwd constraint**: Setting `cwd` to a path inside `~/.claude/` causes the SDK subprocess to hang (observed, root cause unknown). This affects any project located under the Claude config directory, not just this one. Workaround: use a temp dir or a path outside `~/.claude/`.
@@ -110,7 +111,8 @@ Batch read them all in a single read. You must read context in a single turnÒ
 
 ## Locations & commands
 
-- Session files: `~/.claude/projects/-{cwd-with-dashes}/{session-id}.jsonl`
+- Session files (CLI): `~/.claude/projects/-{cwd-with-dashes}/{session-id}.jsonl`
+- Session files (SDK): `~/.claude-sdk/projects/-{cwd-with-dashes}/{session-id}.jsonl` — backend reads from here via `ISOLATED_CONFIG`
 - Svelte app: `cd vibecoded_apps/claude_talks && npm run dev` (port 5173)
 - Watcher CLI: `python -m claude_talks.watcher /path/to/session.jsonl --handler log`
 - Backend: `uvicorn api.server:app --port 8000 --reload`
