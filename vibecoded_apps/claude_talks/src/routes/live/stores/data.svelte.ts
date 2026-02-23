@@ -19,7 +19,6 @@ import type {
   Message,
   PendingApproval,
   PendingTool,
-  RecordedChunk,
   Status,
   VoiceEvent,
 } from '../types';
@@ -29,7 +28,6 @@ interface DataStoreDeps {
   api: ConverseApi;
   getApiKey: () => string | null;
   getMode: () => InteractionMode;
-  correctInstruction: (instruction: string) => Promise<string>;
   readbackInstruction: (text: string) => () => void;
 }
 
@@ -51,10 +49,6 @@ export function createDataStore(deps: DataStoreDeps) {
   // --- Toast (auto-clearing error display) ---
   let toast = $state('');
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
-
-  // --- Audio buffer (for STT corrections) ---
-  let audioBuffer: RecordedChunk[] = [];
-  let sessionStart = 0;
 
   // --- I/O handles (not reactive, not exposed) ---
   let backend: LiveBackend | null = null;
@@ -117,7 +111,6 @@ export function createDataStore(deps: DataStoreDeps) {
       window.dispatchEvent(new CustomEvent('utterance-committed', { detail: { transcript: userText } }));
     }
     pendingInput = '';
-    audioBuffer = [];
 
     // If tool is still streaming, defer assistant commit
     if (pendingTool?.streaming) {
@@ -180,17 +173,6 @@ export function createDataStore(deps: DataStoreDeps) {
     status = s;
   }
 
-  function snapshotUtterance() {
-    let prior = '';
-    for (let i = voiceLog.length - 1; i >= 0; i--) {
-      if (voiceLog[i].role === 'user') { prior = voiceLog[i].text; break; }
-    }
-    const full = prior
-      ? (prior + ' ' + pendingInput).trim()
-      : pendingInput.trim();
-    return { transcription: full, audioChunks: [...audioBuffer] };
-  }
-
   function holdForApproval(
     approval: PendingApproval,
     execute: (instruction: string) => void,
@@ -225,10 +207,7 @@ export function createDataStore(deps: DataStoreDeps) {
     api.leafUuid = null;
   }
 
-  function rewindTo(messageIndex: number) {
-    if (messageIndex < 1) return;
-    const leaf = messages[messageIndex - 1];
-    if (!leaf?.uuid) return;
+  async function editMessage(messageIndex: number) {
     api.abort();
     pendingTool = null;
     pendingOutput = '';
@@ -236,14 +215,19 @@ export function createDataStore(deps: DataStoreDeps) {
     pendingCancel?.();
     pendingCancel = null;
     pendingExecute = null;
-    messages = messages.slice(0, messageIndex);
-    api.leafUuid = leaf.uuid;
-  }
 
-  async function back() {
-    for (let i = messages.length - 1; i >= 1; i--) {
-      if (messages[i].role === 'user') { rewindTo(i); return; }
+    if (messageIndex === 0) {
+      messages = [];
+      api.sessionId = null;
+      api.leafUuid = null;
+    } else {
+      const leaf = messages[messageIndex - 1];
+      if (!leaf?.uuid) return;
+      messages = messages.slice(0, messageIndex);
+      api.leafUuid = leaf.uuid;
     }
+
+    await start();
   }
 
   const dataMethods = {
@@ -257,11 +241,9 @@ export function createDataStore(deps: DataStoreDeps) {
     commitTurn,
     pushError,
     setStatus,
-    snapshotUtterance,
     holdForApproval,
     approve,
     reject,
-    back,
   };
 
   // --- Lifecycle: Live mode ---
@@ -272,22 +254,18 @@ export function createDataStore(deps: DataStoreDeps) {
       pushError('API key not set. Click "API Key" to configure.');
       return;
     }
-    sessionStart = Date.now();
-    audioBuffer = [];
     backend = await connectGemini({
       data: dataMethods,
       converseApi: api,
       tag: 'live',
       apiKey,
       getMode: deps.getMode,
-      correctInstruction: deps.correctInstruction,
       readbackInstruction: deps.readbackInstruction,
     });
     if (!backend) return;
 
     try {
       mic = await audio.startMic((base64) => {
-        audioBuffer.push({ ts: Date.now() - sessionStart, data: base64 });
         backend?.sendRealtimeInput({
           audio: { data: base64, mimeType: 'audio/pcm;rate=16000' },
         });
@@ -324,8 +302,7 @@ export function createDataStore(deps: DataStoreDeps) {
     get claudeSessionId() { return api.sessionId; },
     setClaudeSession(id: string | null) { api.sessionId = id; },
     loadHistory,
-    rewindTo,
-    back,
+    editMessage,
     approve,
     reject,
     start,

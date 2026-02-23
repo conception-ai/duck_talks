@@ -37,6 +37,7 @@ function load(): Persisted {
       if ('learningMode' in parsed && !('mode' in parsed)) {
         parsed.mode = parsed.learningMode ? 'review' : 'direct';
       }
+      if (parsed.mode === 'correct') parsed.mode = 'review';
       return { ...DEFAULTS, ...parsed };
     }
   } catch { /* corrupted — fall through to default */ }

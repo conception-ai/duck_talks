@@ -46,6 +46,11 @@ export function startVoiceApproval(
   };
 
   recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+    if (event.error === 'not-allowed') {
+      console.warn('[voice-approval] mic permission denied — stopping');
+      stop();
+      return;
+    }
     // 'no-speech' and 'aborted' are expected during normal operation
     if (event.error !== 'no-speech' && event.error !== 'aborted') {
       console.warn(`[voice-approval] error: ${event.error}`);

@@ -5,11 +5,6 @@
 
 // --- Domain types ---
 
-export interface RecordedChunk {
-  ts: number;   // ms since session start
-  data: string; // base64 PCM
-}
-
 export interface PendingTool {
   name: string;
   args: Record<string, unknown>;
@@ -43,25 +38,18 @@ export interface VoiceEvent {
 
 // --- Corrections ---
 
-export interface STTCorrection {
-  type: 'stt';
+export interface Correction {
   id: string;
-  createdAt: string;
-  heard: string;
-  meant: string;
-  audioChunks: RecordedChunk[];
+  original: string;
+  corrected: string;
 }
-
-export type Correction = STTCorrection;
 
 // --- Interaction mode ---
 
-export type InteractionMode = 'direct' | 'review' | 'correct';
+export type InteractionMode = 'direct' | 'review';
 
 export interface PendingApproval {
-  rawInstruction?: string;     // original Gemini arg (only set in 'correct' mode)
-  instruction: string;         // what user sees/edits (= raw in review, LLM-corrected in correct)
-  audioChunks: RecordedChunk[];
+  instruction: string;
 }
 
 // --- Port: Data store mutations ---
@@ -78,7 +66,6 @@ export interface DataStoreMethods {
   commitTurn(): void;
   pushError(text: string): void;
   setStatus(s: Status): void;
-  snapshotUtterance(): { transcription: string; audioChunks: RecordedChunk[] };
   holdForApproval(
     approval: PendingApproval,
     execute: (instruction: string) => void,
@@ -86,7 +73,6 @@ export interface DataStoreMethods {
   ): void;
   approve(editedText?: string): void;
   reject(): void;
-  back(): Promise<void>;
 }
 
 // --- Port: Streaming TTS ---

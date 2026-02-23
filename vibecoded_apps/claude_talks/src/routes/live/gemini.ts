@@ -55,7 +55,6 @@ interface ConnectDeps {
   tag: string;
   apiKey: string;
   getMode: () => InteractionMode;
-  correctInstruction: (instruction: string) => Promise<string>;
   readbackInstruction: (text: string) => () => void;
 }
 
@@ -87,10 +86,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     // --- Tool calls ---
     if (message.toolCall?.functionCalls) {
       userSpokeInTurn = false; // Tool was called, don't nudge
-      // Snapshot BEFORE commitTurn clears the buffer
       const mode = deps.getMode();
-      const audioChunks = mode !== 'direct' ? data.snapshotUtterance().audioChunks : [];
-
       data.commitTurn();
       for (const fc of message.toolCall.functionCalls) {
         console.log(`%c GEMINI %c ${ts()} tool: ${fc.name}`, BLUE_BADGE, DIM, fc.args);
@@ -201,25 +197,10 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
 
           if (mode === 'direct') {
             executeConverse(instruction);
-          } else if (mode === 'correct') {
-            console.log(`${ts()} correct mode: running LLM correction`);
-            deps.correctInstruction(instruction).then(
-              (corrected) => {
-                const stopReadback = deps.readbackInstruction(corrected);
-                holdWithVoice(
-                  { rawInstruction: instruction, instruction: corrected, audioChunks },
-                  stopReadback,
-                );
-              },
-              () => {
-                const stopReadback = deps.readbackInstruction(instruction);
-                holdWithVoice({ instruction, audioChunks }, stopReadback);
-              },
-            );
           } else {
             console.log(`${ts()} review mode: holding for approval`);
             const stopReadback = deps.readbackInstruction(instruction);
-            holdWithVoice({ instruction, audioChunks }, stopReadback);
+            holdWithVoice({ instruction }, stopReadback);
           }
           continue;
         }

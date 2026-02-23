@@ -1,59 +1,44 @@
 /**
- * Corrections store — persisted speech corrections.
+ * Corrections store — persisted text pairs (original → corrected).
  * Same localStorage pattern as ui.svelte.ts.
  */
 
-import type { RecordedChunk } from '../types';
-import type { STTCorrection } from '../types';
+import type { Correction } from '../types';
 
 const STORAGE_KEY = 'claude-talks:corrections';
 
-interface Persisted {
-  corrections: STTCorrection[];
-}
-
-function load(): Persisted {
+function load(): Correction[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch { /* corrupted — fall through to default */ }
-  return { corrections: [] };
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const list: Record<string, unknown>[] = parsed.corrections ?? parsed;
+    if (!Array.isArray(list)) return [];
+    // Migrate old STTCorrection format (heard/meant → original/corrected)
+    return list.map((c) => ({
+      id: (c.id as string) ?? crypto.randomUUID(),
+      original: (c.heard ?? c.original ?? '') as string,
+      corrected: (c.meant ?? c.corrected ?? '') as string,
+    }));
+  } catch { return []; }
 }
 
-function save(state: Persisted) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+function save(corrections: Correction[]) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ corrections }));
 }
 
 export function createCorrectionsStore() {
-  const persisted = load();
-  let corrections = $state<STTCorrection[]>(persisted.corrections);
-
-  function persist() {
-    save({ corrections });
-  }
-
-  function addSTT(heard: string, meant: string, audioChunks: RecordedChunk[]): STTCorrection {
-    const correction: STTCorrection = {
-      type: 'stt',
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      heard,
-      meant,
-      audioChunks,
-    };
-    corrections.push(correction);
-    persist();
-    return correction;
-  }
-
-  function remove(id: string) {
-    corrections = corrections.filter((c) => c.id !== id);
-    persist();
-  }
+  let corrections = $state<Correction[]>(load());
 
   return {
     get corrections() { return corrections; },
-    addSTT,
-    remove,
+    add(original: string, corrected: string) {
+      corrections.push({ id: crypto.randomUUID(), original, corrected });
+      save(corrections);
+    },
+    remove(id: string) {
+      corrections = corrections.filter((c) => c.id !== id);
+      save(corrections);
+    },
   };
 }

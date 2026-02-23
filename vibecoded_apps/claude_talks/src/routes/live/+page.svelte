@@ -1,18 +1,16 @@
 <script lang="ts">
   import { marked } from 'marked';
   import { tick } from 'svelte';
-  import { push } from 'svelte-spa-router';
+  import { push, replace } from 'svelte-spa-router';
   import { createDataStore } from './stores/data.svelte';
   import { createUIStore } from './stores/ui.svelte';
   import { createCorrectionsStore } from './stores/corrections.svelte';
   import { startMic, playPcmChunks } from './audio';
   import { speak } from '../../lib/tts';
   import { createConverseApi } from './converse';
-  import { correctInstruction } from './correct';
   import { DEFAULT_SYSTEM_PROMPT } from './defaults';
-  import { createLLM } from '../../lib/llm';
   import { setup as setupRecorder } from '../../lib/recorder';
-  import type { ContentBlock, InteractionMode, Message, STTCorrection } from './types';
+  import type { ContentBlock, InteractionMode, Message } from './types';
 
   setupRecorder();
 
@@ -30,11 +28,6 @@
     })),
     getApiKey: () => ui.apiKey,
     getMode: () => ui.mode,
-    correctInstruction: (instruction: string) => {
-      const key = ui.apiKey;
-      if (!key) return Promise.resolve(instruction);
-      return correctInstruction(createLLM({ apiKey: key }), instruction, corrections.corrections);
-    },
     readbackInstruction: (text: string) => {
       let cancelled = false;
       let stop: (() => void) | undefined;
@@ -151,39 +144,6 @@
 
   // --- Corrections modal ---
   let correctionsOpen = $state(false);
-  let playingId = $state<string | null>(null);
-  let stopPlaying: (() => void) | null = null;
-
-  function playCorrection(c: STTCorrection) {
-    stopPlaying?.();
-    if (playingId === c.id) { playingId = null; return; }
-    const handle = playPcmChunks(c.audioChunks.map(ch => ch.data), 16000, () => { playingId = null; });
-    stopPlaying = handle.stop;
-    playingId = c.id;
-  }
-
-  function downloadCorrection(c: STTCorrection) {
-    const blob = new Blob(
-      [JSON.stringify({ chunks: c.audioChunks, sampleRate: 16000 })],
-      { type: 'application/json' },
-    );
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `correction-${c.id.slice(0, 8)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  function playApprovalAudio() {
-    const chunks = live.pendingApproval?.audioChunks;
-    if (!chunks?.length) return;
-    stopPlaying?.();
-    if (playingId === 'approval') { playingId = null; return; }
-    const handle = playPcmChunks(chunks.map(ch => ch.data), 16000, () => { playingId = null; });
-    stopPlaying = handle.stop;
-    playingId = 'approval';
-  }
 
   let hoveredMsg = $state<number | null>(null);
   let editing = $state(false);
@@ -202,9 +162,9 @@
 
   function handleSubmitEdit() {
     if (!live.pendingApproval) return;
-    const original = live.pendingApproval.rawInstruction ?? live.pendingApproval.instruction;
+    const original = live.pendingApproval.instruction;
     if (editDraft !== original) {
-      corrections.addSTT(original, editDraft, live.pendingApproval.audioChunks);
+      corrections.add(original, editDraft);
     }
     live.approve(editDraft);
     editing = false;
@@ -267,6 +227,12 @@
     tick().then(() => messagesEl?.scrollTo(0, messagesEl.scrollHeight));
   });
 
+  // Sync URL with session ID
+  $effect(() => {
+    const id = live.claudeSessionId;
+    if (id && id !== params?.id) replace(`/live/${id}`);
+  });
+
   // Sync waveform with connection status
   $effect(() => {
     if (live.status === 'connected') {
@@ -303,8 +269,8 @@
           <div class="bubble {msg.role}"
                onmouseenter={() => hoveredMsg = i}
                onmouseleave={() => hoveredMsg = null}>
-            {#if hoveredMsg === i && i > 0 && msg.uuid}
-              <button class="rewind-btn" onclick={() => live.rewindTo(i)}>Rewind</button>
+            {#if hoveredMsg === i && msg.role === 'user' && msg.uuid && live.status === 'idle'}
+              <button class="edit-btn" onclick={() => live.editMessage(i)}>Edit</button>
             {/if}
             {#if msg.role === 'user'}
               <p>{messageText(msg)}</p>
@@ -371,11 +337,6 @@
           </div>
         {:else}
           <div class="approval-actions">
-            {#if live.pendingApproval.audioChunks.length}
-              <button class="btn-secondary correction-play" onclick={playApprovalAudio}>
-                {playingId === 'approval' ? '\u25A0' : '\u25B6'}
-              </button>
-            {/if}
             <button class="btn-accept" onclick={handleAccept}>Accept</button>
             <button class="btn-secondary" onclick={handleStartEdit}>Edit</button>
             <button class="btn-reject" onclick={handleReject}>Reject</button>
@@ -454,7 +415,6 @@
         <select bind:value={modeDraft}>
           <option value="direct">Direct</option>
           <option value="review">Review</option>
-          <option value="correct">Correct</option>
         </select>
       </label>
 
@@ -502,20 +462,14 @@
   <div class="backdrop" onkeydown={() => {}} onclick={() => { correctionsOpen = false; }}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="modal" onkeydown={() => {}} onclick={(e) => e.stopPropagation()}>
-      <h2>STT Corrections</h2>
+      <h2>Corrections</h2>
       {#each corrections.corrections as c (c.id)}
         <div class="correction-row">
           <div class="correction-text">
-            <span class="correction-heard">{c.heard}</span>
+            <span class="correction-heard">{c.original}</span>
             <span class="correction-arrow">-&gt;</span>
-            <span class="correction-meant">{c.meant}</span>
+            <span class="correction-meant">{c.corrected}</span>
           </div>
-          {#if c.audioChunks.length}
-            <button class="correction-play" onclick={() => playCorrection(c)}>
-              {playingId === c.id ? '\u25A0' : '\u25B6'}
-            </button>
-            <button class="correction-play" onclick={() => downloadCorrection(c)}>{'\u2193'}</button>
-          {/if}
           <button class="correction-delete" onclick={() => corrections.remove(c.id)}>x</button>
         </div>
       {/each}
@@ -626,8 +580,8 @@
     opacity: 0.7;
   }
 
-  /* --- Rewind --- */
-  .rewind-btn {
+  /* --- Edit --- */
+  .edit-btn {
     position: absolute;
     top: 0;
     right: 0;
@@ -642,7 +596,7 @@
     animation: fade-in 0.15s ease-out forwards;
   }
 
-  .rewind-btn:hover {
+  .edit-btn:hover {
     color: #dc2626;
     border-color: #dc2626;
   }
@@ -848,10 +802,6 @@
     font-size: 0.8rem;
     padding: 0.3rem 0.75rem;
     border-radius: 0.25rem;
-  }
-
-  .approval-actions .correction-play {
-    margin-right: auto;
   }
 
   .btn-accept { color: #059669; border-color: #059669; }
@@ -1080,13 +1030,6 @@
   .correction-heard { text-decoration: line-through; color: #9ca3af; }
   .correction-arrow { color: #9ca3af; margin: 0 0.25rem; }
   .correction-meant { color: #059669; }
-
-  .correction-play {
-    font-size: 0.7rem;
-    padding: 0.2rem 0.5rem;
-    color: #2563eb;
-    border-color: #93c5fd;
-  }
 
   .correction-delete {
     font-size: 0.7rem;
