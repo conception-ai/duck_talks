@@ -74,6 +74,7 @@ export interface DataStoreMethods {
   appendTool(text: string): void;
   appendBlock(block: ContentBlock): void;
   finishTool(): void;
+  commitUserMessage(text: string): void;
   commitTurn(): void;
   pushError(text: string): void;
   setStatus(s: Status): void;

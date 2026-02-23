@@ -117,6 +117,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
           // can tear down both at once via abort().
           const executeConverse = (approvedInstruction: string) => {
             activeConverse?.abort(); // safety: close any previous
+            data.commitUserMessage(approvedInstruction);
 
             // Unfreeze Outer Gemini immediately — Inner Gemini handles audio separately
             sessionRef?.sendToolResponse({

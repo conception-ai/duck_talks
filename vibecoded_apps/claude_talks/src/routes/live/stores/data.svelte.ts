@@ -86,6 +86,10 @@ export function createDataStore(deps: DataStoreDeps) {
     }
   }
 
+  function commitUserMessage(text: string) {
+    messages.push({ role: 'user', content: text });
+  }
+
   function appendBlock(block: ContentBlock) {
     if (pendingTool) pendingTool.blocks.push(block);
   }
@@ -149,13 +153,7 @@ export function createDataStore(deps: DataStoreDeps) {
       if (text) {
         voiceLog.push({ role: 'gemini', text, ts: Date.now() });
       }
-      // User instruction that was sent to Claude
-      if (tool.name === 'converse' && tool.args.instruction) {
-        messages.push({
-          role: 'user',
-          content: String(tool.args.instruction),
-        });
-      }
+      // User message already pushed by commitUserMessage() at converse start
       // Claude's response
       if (tool.blocks.length > 0) {
         messages.push({ role: 'assistant', content: tool.blocks });
@@ -251,6 +249,7 @@ export function createDataStore(deps: DataStoreDeps) {
   const dataMethods = {
     appendInput,
     appendOutput,
+    commitUserMessage,
     startTool,
     appendTool,
     appendBlock,
