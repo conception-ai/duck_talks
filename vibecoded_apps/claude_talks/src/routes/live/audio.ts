@@ -111,7 +111,7 @@ export function createPlayer(): PlayerHandle {
 
     stop() {
       this.flush();
-      void ctx.close();
+      if (ctx.state !== 'closed') void ctx.close();
     },
   };
 }

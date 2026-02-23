@@ -19,7 +19,7 @@ import { createPlayer } from './audio';
 import type { StreamingTTS } from './types';
 
 const TTS_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
-const TTS_PROMPT = 'Read aloud exactly what is sent to you. Do not add any commentary.';
+const TTS_PROMPT = 'You are a text-to-speech reader. Read aloud EXACTLY what the user sends, word for word. NEVER respond, answer questions, or add commentary. Just read the text out loud.';
 
 // Log styles
 const GREEN_BADGE = 'background:#059669;color:white;font-weight:bold;padding:1px 6px;border-radius:3px';
@@ -30,7 +30,7 @@ export function openTTSSession(apiKey: string): StreamingTTS {
   let session: Session | null = null;
   let closed = false;
   let finishing = false;
-  let speaking = false;
+  let pendingSends = 0;
   let firstSendT0 = 0;
   let ttftLogged = false;
   const preConnectQueue: string[] = [];
@@ -38,10 +38,10 @@ export function openTTSSession(apiKey: string): StreamingTTS {
   function sendText(text: string) {
     if (!session || closed) return;
     if (!firstSendT0) firstSendT0 = performance.now();
-    speaking = true;
-    console.log(`%c TTS %c ← ${text}`, GREEN_BADGE, DIM);
+    pendingSends++;
+    console.log(`%c TTS %c ← [${pendingSends}] ${text}`, GREEN_BADGE, DIM);
     session.sendClientContent({
-      turns: [{ role: 'user', parts: [{ text }] }],
+      turns: [{ role: 'user', parts: [{ text: `[READ]: ${text}` }] }],
       turnComplete: true,
     });
   }
@@ -77,8 +77,9 @@ export function openTTSSession(apiKey: string): StreamingTTS {
           console.log(`%c TTS %c → ${msg.serverContent.outputTranscription.text}`, GREEN_BADGE, DIM);
         }
         if (msg.serverContent?.turnComplete) {
-          speaking = false;
-          if (finishing) {
+          pendingSends = Math.max(0, pendingSends - 1);
+          console.log(`%c TTS %c turnComplete (pending: ${pendingSends})`, GREEN_BADGE, DIM);
+          if (finishing && pendingSends === 0) {
             console.log(`%c TTS %c done — closing`, GREEN_BADGE, DIM);
             session?.close();
             player.stop();
@@ -112,8 +113,8 @@ export function openTTSSession(apiKey: string): StreamingTTS {
       if (closed) return;
       sentenceBuf.flush();
       finishing = true;
-      if (!speaking) {
-        console.log(`%c TTS %c finish (not speaking) — closing`, GREEN_BADGE, DIM);
+      if (pendingSends === 0) {
+        console.log(`%c TTS %c finish (nothing pending) — closing`, GREEN_BADGE, DIM);
         closed = true;
         session?.close();
         player.stop();
