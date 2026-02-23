@@ -104,9 +104,9 @@ Your code must be clean, minimalist and easy to read.
 ## Locations & commands
 
 - Session files: `~/.claude/projects/-{cwd-with-dashes}/{session-id}.jsonl`
-- **Both servers**: `./dev.sh` (launches uvicorn + vite, Ctrl+C kills both)
-- **Logs**: `.logs/api.log` (FastAPI), `.logs/svelte.log` (Vite) — read these to check server output during testing
+- Svelte app: `cd vibecoded_apps/claude_talks && npm run dev` (port 5173)
 - Watcher CLI: `python -m claude_talks.watcher /path/to/session.jsonl --handler log`
+- Backend: `uvicorn api.server:app --port 8000 --reload`
 - Test (mock, no credits): `curl -s -N -X POST http://localhost:8000/api/converse/test -H 'Content-Type: application/json' -d '{"instruction":"test"}'`
 - Test (real): `curl -s -N -X POST http://localhost:8000/api/converse -H 'Content-Type: application/json' -d '{"instruction":"say hello"}'`
 
