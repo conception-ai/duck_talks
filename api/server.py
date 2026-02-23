@@ -13,16 +13,31 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from claude_client import Claude, ContentBlockChunk, ISOLATED_CONFIG, TextDelta
+from claude_client import (
+    Claude,
+    ContentBlockChunk,
+    ISOLATED_CONFIG,
+    REGULAR_CONFIG,
+    TextDelta,
+)
 from models import AssistantEntry, Conversation, UserEntry, preview, fork_session
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 log = logging.getLogger("api")
 
 app = FastAPI()
-claude = Claude(cwd=ISOLATED_CONFIG.cwd)
 
-_PROJECT_DIR = ISOLATED_CONFIG.project_dir
+configs = {
+    "isolated": ISOLATED_CONFIG,
+    "regular": REGULAR_CONFIG,
+}
+
+CONFIG_KEY = "isolated"
+config = configs[CONFIG_KEY]
+
+claude = Claude(cwd=config.cwd)
+
+_PROJECT_DIR = config.project_dir
 
 
 class SessionInfo(BaseModel):
