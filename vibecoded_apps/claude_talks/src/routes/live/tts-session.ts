@@ -1,10 +1,10 @@
 /**
- * Ephemeral Gemini Live session that acts as a streaming TTS pipe.
+ * Persistent Gemini Live session that acts as a streaming TTS pipe.
  * Fully self-contained: owns its own Gemini connection, sentence buffer,
  * and audio player.
  *
- * One instance per `converse` call. Opened when Claude starts streaming,
- * closed on done/error/interrupt.
+ * One instance per Gemini Live session, reused across converse calls.
+ * `interrupt()` stops playback between calls; `close()` is final teardown.
  *
  * Each sentence-buffer flush is sent directly to Gemini.
  */
@@ -30,6 +30,7 @@ export function openTTSSession(apiKey: string): StreamingTTS {
   let session: Session | null = null;
   let closed = false;
   let finishing = false;
+  let muted = false;
   let pendingSends = 0;
   let firstSendT0 = 0;
   let ttftLogged = false;
@@ -67,7 +68,7 @@ export function openTTSSession(apiKey: string): StreamingTTS {
       onmessage: (msg) => {
         if (msg.serverContent?.modelTurn?.parts) {
           for (const p of msg.serverContent.modelTurn.parts) {
-            if (p.inlineData?.data && !closed) {
+            if (p.inlineData?.data && !closed && !muted) {
               if (!ttftLogged && firstSendT0) {
                 ttftLogged = true;
                 console.log(`%c TTS %c TTFT: ${Math.round(performance.now() - firstSendT0)}ms`, GREEN_BADGE, DIM);
@@ -83,9 +84,8 @@ export function openTTSSession(apiKey: string): StreamingTTS {
           pendingSends = Math.max(0, pendingSends - 1);
           console.log(`%c TTS %c turnComplete (pending: ${pendingSends})`, GREEN_BADGE, DIM);
           if (finishing && pendingSends === 0) {
-            console.log(`%c TTS %c done — closing`, GREEN_BADGE, DIM);
-            session?.close();
-            player.stop();
+            console.log(`%c TTS %c done — ready for next converse`, GREEN_BADGE, DIM);
+            finishing = false;
           }
         }
       },
@@ -108,6 +108,11 @@ export function openTTSSession(apiKey: string): StreamingTTS {
   return {
     send(text: string) {
       if (closed) return;
+      if (muted) {
+        muted = false;
+        firstSendT0 = 0;
+        ttftLogged = false;
+      }
       if (!session) {
         preConnectQueue.push(text);
       } else {
@@ -117,17 +122,28 @@ export function openTTSSession(apiKey: string): StreamingTTS {
     finish() {
       if (closed) return;
       sentenceBuf.flush();
-      finishing = true;
       if (pendingSends === 0) {
-        console.log(`%c TTS %c finish (nothing pending) — closing`, GREEN_BADGE, DIM);
-        closed = true;
-        session?.close();
-        player.stop();
+        console.log(`%c TTS %c finish (nothing pending) — ready`, GREEN_BADGE, DIM);
+        finishing = false;
+      } else {
+        finishing = true;
       }
     },
-    close() {
-      closed = true;
+    interrupt() {
+      if (closed) return;
+      muted = true;
       finishing = false;
+      pendingSends = 0;
+      sentenceBuf.clear();
+      player.flush();
+      console.log(`%c TTS %c interrupted — muted`, GREEN_BADGE, DIM);
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      muted = true;
+      finishing = false;
+      pendingSends = 0;
       sentenceBuf.clear();
       player.flush();
       player.stop();

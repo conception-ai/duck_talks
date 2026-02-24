@@ -15,8 +15,9 @@
  *
  * The `converse` tool is declared as BLOCKING so Gemini is frozen by the
  * API while Claude streams. The tool response is sent immediately as
- * `{ result: "done" }` to unfreeze Gemini. A separate ephemeral TTS
- * session handles audio output — no relay through the main session.
+ * `{ result: "done" }` to unfreeze Gemini. A persistent TTS session
+ * (one per voice session) handles audio output — no relay through the
+ * main session.
  */
 
 import {
@@ -72,7 +73,8 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   let sessionRef: Session | null = null;
   let closed = false; // hoisted so onclose callback can reach it
   let approvalPending = false; // true during BLOCKING approval hold — gates sendRealtimeInput
-  let activeConverse: { abort: () => void } | null = null; // Claude SSE + Inner Gemini TTS bundle
+  let activeConverse: { abort: () => void } | null = null; // Claude SSE abort handle
+  const tts = openTTSSession(apiKey); // Persistent TTS — one WebSocket per voice session
   let userSpokeInTurn = false;
   const t0 = Date.now();
   const ts = () => {
@@ -120,7 +122,6 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
               functionResponses: [{ id: fc.id, name: 'converse', response: { result: 'done' } }],
             });
 
-            const tts = openTTSSession(apiKey);
             let aborted = false;
             let claudeDone = false;
 
@@ -128,7 +129,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
               if (aborted) return;
               aborted = true;
               converseApi.abort();
-              tts.close();
+              tts.interrupt();
               if (!claudeDone) data.finishTool();
               activeConverse = null;
             };
@@ -282,6 +283,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
           closed = true;
           sessionRef = null;
           activeConverse?.abort();
+          tts.close();
           console.log(`${ts()} closed: ${e.reason}`);
           data.setStatus('idle');
           if (!wasExpected && e.reason) {
@@ -302,7 +304,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       sendRealtimeInput: (input) => { if (!closed && !approvalPending) session.sendRealtimeInput(input); },
       sendClientContent: (content) => { if (!closed) session.sendClientContent(content); },
       sendToolResponse: (response) => { if (!closed) session.sendToolResponse(response as LiveSendToolResponseParameters); },
-      close: () => { activeConverse?.abort(); closed = true; sessionRef = null; session.close(); },
+      close: () => { activeConverse?.abort(); tts.close(); closed = true; sessionRef = null; session.close(); },
     };
   } catch (e: unknown) {
     console.error(`${ts()} connect failed:`, e);

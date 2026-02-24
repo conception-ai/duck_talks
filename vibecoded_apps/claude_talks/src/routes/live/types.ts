@@ -80,6 +80,7 @@ export interface DataStoreMethods {
 export interface StreamingTTS {
   send(text: string): void;
   finish(): void;
+  interrupt(): void;
   close(): void;
 }
 
