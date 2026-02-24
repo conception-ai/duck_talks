@@ -74,7 +74,12 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   let closed = false; // hoisted so onclose callback can reach it
   let approvalPending = false; // true during BLOCKING approval hold — gates sendRealtimeInput
   let activeConverse: { abort: () => void } | null = null; // Claude SSE abort handle
-  const tts = openTTSSession(apiKey); // Persistent TTS — one WebSocket per voice session
+  const tts = openTTSSession(apiKey, (text) => {
+    if (!closed && sessionRef) {
+      sessionRef.sendClientContent({ turns: [{ role: 'model', parts: [{ text }] }], turnComplete: false });
+      console.log(`%c GEMINI %c ${ts()} ← ${text.length} chars`, BLUE_BADGE, DIM);
+    }
+  });
   let modelAudioSeen = false; // first model audio per turn — VAD-to-response proxy
   const t0 = Date.now();
   const ts = () => {
@@ -155,10 +160,6 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
                 if (aborted) return;
                 data.appendTool(text);
                 tts.send(text);
-                if (!closed && sessionRef) {
-                  sessionRef.sendClientContent({ turns: [{ role: 'model', parts: [{ text }] }], turnComplete: false });
-                  console.log(`%c GEMINI %c ${ts()} ← ${text.length} chars`, BLUE_BADGE, DIM);
-                }
               },
               onBlock(block) {
                 if (aborted) return;
