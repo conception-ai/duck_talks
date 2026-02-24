@@ -76,6 +76,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
   let activeConverse: { abort: () => void } | null = null; // Claude SSE abort handle
   const tts = openTTSSession(apiKey); // Persistent TTS — one WebSocket per voice session
   let userSpokeInTurn = false;
+  let modelAudioSeen = false; // first model audio per turn — VAD-to-response proxy
   const t0 = Date.now();
   const ts = () => {
     const elapsed = (Date.now() - t0) / 1000;
@@ -236,6 +237,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
     if (sc.interrupted) {
       console.log(`%c GEMINI %c ${ts()} interrupted (sc.interrupted)${activeConverse ? ' — aborting active converse' : ''}`, BLUE_BADGE, DIM);
       userSpokeInTurn = false;
+      modelAudioSeen = false;
       activeConverse?.abort();
       data.commitTurn();
       return;
@@ -253,7 +255,17 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       userSpokeInTurn = true;
     }
 
-    // Main session audio output is ignored (TTS session handles audio)
+    // Main session audio playback is ignored (TTS session handles playback)
+    // But log first arrival — it timestamps when VAD finalized end-of-speech
+    if (sc.modelTurn?.parts) {
+      for (const p of sc.modelTurn.parts) {
+        if (p.inlineData?.data && !modelAudioSeen) {
+          modelAudioSeen = true;
+          console.log(`%c GEMINI %c ${ts()} model audio start`, BLUE_BADGE, DIM);
+          break;
+        }
+      }
+    }
 
     // Gemini spoke (debug — should be silent in relay mode)
     if (sc.outputTranscription?.text) {
@@ -277,6 +289,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
         });
       }
       userSpokeInTurn = false;
+      modelAudioSeen = false;
     }
   }
 
@@ -292,7 +305,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       },
       callbacks: {
         onopen: () => {
-          console.log(`${ts()} connected`);
+          console.log(`%c GEMINI %c ${ts()} connected (${Date.now() - t0}ms)`, BLUE_BADGE, DIM);
           data.setStatus('connected');
         },
         onmessage: (msg: LiveServerMessage) => handleMessage(msg),
