@@ -7,28 +7,23 @@
 const ACCEPT_WORDS = new Set(['accept', 'yes']);
 const REJECT_WORDS = new Set(['reject', 'no']);
 
-// Chrome exposes this under a vendor prefix
-const SpeechRecognition =
-  (globalThis as Record<string, unknown>).webkitSpeechRecognition as
-    typeof globalThis.SpeechRecognition | undefined;
-
 export function startVoiceApproval(
   onAccept: () => void,
   onReject: () => void,
 ): (() => void) | null {
-  if (!SpeechRecognition) {
+  if (!webkitSpeechRecognition) {
     console.warn('[voice-approval] SpeechRecognition not available');
     return null;
   }
 
-  const recognition = new SpeechRecognition();
+  const recognition = new webkitSpeechRecognition();
   recognition.continuous = true;
   recognition.interimResults = false;
   recognition.lang = 'en-US';
 
   let stopped = false;
 
-  recognition.onresult = (event: SpeechRecognitionEvent) => {
+  recognition.onresult = (event) => {
     // Check only the latest result
     const result = event.results[event.results.length - 1];
     if (!result?.isFinal) return;
@@ -46,7 +41,7 @@ export function startVoiceApproval(
     }
   };
 
-  recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+  recognition.onerror = (event) => {
     if (event.error === 'not-allowed') {
       console.warn('[voice-approval] mic permission denied — stopping');
       stop();
