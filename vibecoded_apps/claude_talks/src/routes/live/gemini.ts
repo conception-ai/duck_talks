@@ -217,6 +217,18 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
       return;
     }
 
+    // --- GoAway (server about to disconnect) ---
+    if (message.goAway) {
+      console.log(`%c GEMINI %c ${ts()} ⚠ goAway — timeLeft: ${message.goAway.timeLeft}`, BLUE_BADGE, DIM);
+    }
+
+    // --- Usage metadata (periodic token counts) ---
+    if (message.usageMetadata) {
+      const u = message.usageMetadata;
+      const details = u.responseTokensDetails?.map((d: { modality?: string; tokenCount?: number }) => `${d.modality}:${d.tokenCount}`).join(' ') ?? '';
+      console.log(`%c GEMINI %c ${ts()} tokens: ${u.totalTokenCount} total ${details}`, BLUE_BADGE, DIM);
+    }
+
     // --- Server content (STT, turn boundaries) ---
     const sc = message.serverContent;
     if (!sc) return;
@@ -243,6 +255,15 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
 
     // Main session audio output is ignored (TTS session handles audio)
 
+    // Gemini spoke (debug — should be silent in relay mode)
+    if (sc.outputTranscription?.text) {
+      console.debug(`%c GEMINI %c ${ts()} [output] ${sc.outputTranscription.text}`, BLUE_BADGE, DIM);
+    }
+
+    if (sc.generationComplete) {
+      console.log(`%c GEMINI %c ${ts()} generationComplete`, BLUE_BADGE, DIM);
+    }
+
     if (sc.turnComplete) {
       console.log(`%c GEMINI %c ${ts()} done`, BLUE_BADGE, DIM);
       data.commitTurn();
@@ -267,6 +288,7 @@ export async function connectGemini(deps: ConnectDeps): Promise<LiveBackend | nu
         tools: TOOLS,
         systemInstruction: BASE_PROMPT,
         inputAudioTranscription: {},
+        outputAudioTranscription: {},
       },
       callbacks: {
         onopen: () => {
