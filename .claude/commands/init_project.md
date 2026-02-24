@@ -16,7 +16,7 @@ Batch read them all in a single read. You must read context in a single turnÒ
 | @vibecoded_apps/claude_talks/src/routes/home/+page.svelte | Home page — session list, fetches `GET /api/sessions`, navigates to `/live/:id` |
 | @vibecoded_apps/claude_talks/src/App.svelte | Router — `/` → HomePage, `/live` → LivePage, `/live/:id` → LivePage (with session), `/recordings` → RecordingsPage |
 | @vibecoded_apps/claude_talks/src/routes/live/+page.svelte | Gemini Live — 3-zone layout: chat-scroll (messages + faded streaming bubble), dock (float transcription/approval + input-bar with real waveform + mic/stop), modals (Settings, Corrections). Waveform via second `getUserMedia` + `AnalyserNode`, synced to `live.status` via `$effect`. Loads history on mount. Renders `messages[]` only (not `voiceLog[]`) |
-| @vibecoded_apps/claude_talks/src/routes/live/types.ts | Port interfaces (DataStoreMethods with `back()`, AudioPort, LiveBackend, ConverseApi with `abort()`, StreamingTTS, RealtimeInput) + CC message types (`ContentBlock`, `Message`, `VoiceEvent`) + `InteractionMode` (`'direct' \| 'review' \| 'correct'`) + correction types (STTCorrection, PendingApproval) |
+| @vibecoded_apps/claude_talks/src/routes/live/types.ts | Re-exports render types from `lib/chat-types.ts` (`ContentBlock`, `Message`, `VoiceEvent`, `PendingTool`, `PendingApproval`, `Status`, `InteractionMode`, `Correction`). Keeps port interfaces locally: `DataStoreMethods`, `AudioPort`, `LiveBackend`, `ConverseApi`, `StreamingTTS`, `RealtimeInput` |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/data.svelte.ts | Data store — two-array model: `messages[]` (CC conversation, mutable) + `voiceLog[]` (ephemeral, append-only). `loadHistory()`, `back()`, session lifecycle, audio buffer, approval flow. No player lifecycle — TTS session owns its own player |
 | @vibecoded_apps/claude_talks/src/routes/live/stores/ui.svelte.ts | UI store — persistent user prefs (apiKey, mode: InteractionMode, model, systemPrompt, readbackEnabled, permissionMode). `setMode()` sets mode directly. `load()` merges localStorage with `DEFAULTS` so new fields get populated. Migrates old `learningMode: boolean` on load |
 | @vibecoded_apps/claude_talks/src/routes/live/gemini.ts | Gemini Live connection + message handling (STT + VAD + orchestration only — no TTS). `converse` tool is BLOCKING — Gemini freezes, tool response sent immediately as `{ result: "done" }` (no Claude text → no context contamination). Opens persistent TTS session once at `connectGemini()` scope, reused across converse calls. `activeConverse` ref enables interrupt (`tts.interrupt()` + abort Claude SSE). `holdWithVoice` wires voice approval during BLOCKING hold. `approvalPending` gates `sendRealtimeInput` |
@@ -41,10 +41,39 @@ Batch read them all in a single read. You must read context in a single turnÒ
 | vibecoded_apps/claude_talks/src/lib/recording-db.ts | IndexedDB CRUD for utterance recordings — `saveRecording`, `getAllRecordings`, `deleteRecording`, `clearAllRecordings` |
 | vibecoded_apps/claude_talks/src/lib/recorder.ts | Black-box utterance recorder — taps `getUserMedia` to capture mic audio, auto-segments on `utterance-committed` CustomEvents, persists to IndexedDB. Setup called from live `+page.svelte` on mount. Console access via `window.__recorder` |
 | vibecoded_apps/claude_talks/src/routes/recordings/+page.svelte | Recordings browser — reads from IndexedDB, lists utterances with play/download/delete buttons. Route: `/#/recordings` |
+| vibecoded_apps/claude_talks/src/lib/chat-types.ts | Shared render types: `Message`, `ContentBlock`, `PendingTool`, `PendingApproval`, `Status`, `VoiceEvent`, `Correction`, `InteractionMode`. Source of truth — `live/types.ts` re-exports from here |
+| vibecoded_apps/claude_talks/src/lib/message-helpers.ts | Pure functions on `Message`: `messageText()`, `messageToolUses()`, `messageToolResults()`, `messageThinking()`, `buildToolResultMap()`, `isToolResultOnly()`. Used by both `live/` and `new-ui/` |
+| vibecoded_apps/claude_talks/src/lib/dev/ScenarioSelector.svelte | Reusable dev dropdown for switching UI states. Generic over `T` (any scenario state shape). Positioned top-right |
 
 ## Guiding Principles
 
 - **Clean data flows**: Raw signals (STT chunks, VAD events) must be merged into clean domain objects at the store level. Consumers (UI, corrections, API calls) should never reconstruct or re-derive from raw data. Fix the source, not each consumer. Leverage Svelte's reactivity: one clean `$state` → many `$derived` readers.
+
+## UI/UX Iteration Process
+
+**Production → Prototype (fast start):**
+1. Create a new route under `src/routes/` (e.g. `new-ui/`)
+2. Import shared types from `lib/chat-types.ts` and helpers from `lib/message-helpers.ts`
+3. Create a `scenarios.ts` with mock data in `ScenarioState` shape: `{ messages: Message[], status: Status, pendingTool, pendingApproval, pendingInput, toast }`
+4. Build `+page.svelte` using `ScenarioSelector` from `lib/dev/ScenarioSelector.svelte` — top-right dropdown drives all UI state via `$derived`
+5. Register the route in `App.svelte`
+6. No backend, no stores, no audio needed — iterate at `http://localhost:5173/#/your-route`
+
+**Prototype → Production (propagate):**
+1. Diff `new-ui/+page.svelte` vs `live/+page.svelte` — focus on markup and CSS changes
+2. Template bindings carry over directly because both use the same `lib/message-helpers` and `lib/chat-types`
+3. If types changed during prototyping, reconcile `lib/chat-types.ts` and verify `live/types.ts` re-exports still work
+4. Run `npm run check` to catch breakage
+
+**Key pattern — scenario-driven rendering (Svelte 5):**
+```svelte
+let scenario = $state(SCENARIOS[0]);              // ScenarioSelector binds here
+let messages = $derived(scenario.state.messages);  // everything derives from scenario
+let status = $derived(scenario.state.status);
+let inputText = $state('');                        // local interactive state
+```
+
+**Reference layout (claude.ai pattern):** Single scroll container with messages (`flex: 1`) + input (`position: sticky; bottom: 0`). Buffer zone between messages and input is emergent (flex-1 stretching), not an explicit spacer. See `new-ui/+page.svelte` for implementation.
 
 ## Gotchas
 
