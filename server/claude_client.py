@@ -124,7 +124,9 @@ class Claude:
             stderr=self._stderr,
         )
         if self._config.cli_path:
-            options = replace(options, cli_path=self._config.cli_path)
+            options = replace(
+                options, cli_path=os.path.expanduser(self._config.cli_path)
+            )
         if session_id:
             options = replace(options, resume=session_id, fork_session=fork)
             log.info("resuming session %s (fork=%s)", session_id, fork)

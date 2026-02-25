@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 from dataclasses import dataclass
+from typing import cast
 
 
 @dataclass
@@ -21,7 +22,11 @@ def parse_args() -> Args:
     _ = parser.add_argument("--host", default="127.0.0.1")
     _ = parser.add_argument("--no-browser", action="store_true")
     ns = parser.parse_args()
-    return Args(port=ns.port, host=ns.host, no_browser=ns.no_browser)
+    return Args(
+        port=cast(int, ns.port),
+        host=cast(str, ns.host),
+        no_browser=cast(bool, ns.no_browser),
+    )
 
 
 def main() -> None:
@@ -43,6 +48,8 @@ def main() -> None:
     import shutil
 
     cli_path = os.environ.get("CLAUDE_CLI_PATH")
+    if cli_path:
+        cli_path = os.path.expanduser(cli_path)
     if cli_path and not os.path.isfile(cli_path):
         print(f"Error: CLAUDE_CLI_PATH not found: {cli_path}", file=sys.stderr)
         sys.exit(1)

@@ -32,9 +32,10 @@ log = logging.getLogger("api")
 
 # ── Config from env vars ────────────────────────────────────────────────────
 
+_cli_path = os.environ.get("CLAUDE_CLI_PATH")
 config = ClaudeConfig(
     config_dir=os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"),
-    cli_path=os.environ.get("CLAUDE_CLI_PATH"),
+    cli_path=os.path.expanduser(_cli_path) if _cli_path else None,
 )
 
 claude = Claude(config=config)
