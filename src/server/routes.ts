@@ -24,6 +24,7 @@ import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk';
 export interface ServerConfig {
   claude: ClaudeConfig;
   cwd: string;
+  publicDir?: string; // serve built frontend (production mode)
 }
 
 export function createApp(cfg: ServerConfig): express.Express {
@@ -294,6 +295,12 @@ export function createApp(cfg: ServerConfig): express.Express {
 
     res.end();
   });
+
+  // --- Static files (production — serves built frontend) ---
+
+  if (cfg.publicDir && existsSync(cfg.publicDir)) {
+    app.use(express.static(cfg.publicDir));
+  }
 
   return app;
 }

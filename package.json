@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Voice interface for Claude Code",
   "scripts": {
+    "start": "node dist/server/cli.js",
     "dev": "npx tsx src/server/cli.ts --no-browser & vite & wait",
     "dev:server": "tsx src/server/cli.ts --no-browser",
     "dev:client": "vite",

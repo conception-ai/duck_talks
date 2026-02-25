@@ -1,11 +1,31 @@
 /**
- * CLI entry point — port of Python cli.py.
- * Parses args, checks prerequisites, starts Express server.
+ * CLI entry point.
+ * Parses args, loads .env, checks prerequisites, starts Express server.
  */
 
 import { execSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createApp, type ServerConfig } from './routes.js';
 import type { ClaudeConfig } from './claude-client.js';
+
+// --- .env loader (no deps) ---
+
+function loadEnv(): void {
+  try {
+    const content = readFileSync('.env', 'utf-8');
+    for (const line of content.split('\n')) {
+      const match = line.match(/^([^#=]+)=(.*)$/);
+      if (match) {
+        const key = match[1]!.trim();
+        if (!process.env[key]) process.env[key] = match[2]!.trim();
+      }
+    }
+  } catch {
+    // no .env file
+  }
+}
 
 // --- Arg parsing ---
 
@@ -47,6 +67,8 @@ function checkPrereqs(config: ClaudeConfig): void {
 
 // --- Main ---
 
+loadEnv();
+
 const { port, host, noBrowser } = parseArgs(process.argv);
 
 const claudeConfig: ClaudeConfig = {
@@ -56,16 +78,26 @@ const claudeConfig: ClaudeConfig = {
 
 checkPrereqs(claudeConfig);
 
+// Resolve built frontend: works from both src/server/ (dev) and dist/server/ (prod)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const publicDir = join(__dirname, '..', '..', 'dist', 'public');
+
 const serverConfig: ServerConfig = {
   claude: claudeConfig,
   cwd: process.cwd(),
+  publicDir: existsSync(publicDir) ? publicDir : undefined,
 };
 
 const app = createApp(serverConfig);
 
 app.listen(port, host, () => {
-  console.info(`Reduck TS server listening on http://${host}:${port}`);
+  console.info(`Reduck listening on http://${host}:${port}`);
   console.info(`Project: ${serverConfig.cwd}`);
+  if (serverConfig.publicDir) {
+    console.info('Serving frontend from dist/public/');
+  } else {
+    console.info('No built frontend found — run "npm run build" first, or use Vite dev server');
+  }
 
   if (!noBrowser) {
     setTimeout(() => {

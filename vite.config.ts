@@ -24,6 +24,9 @@ export default defineConfig({
       },
     },
   ],
+  build: {
+    outDir: 'dist/public',
+  },
   envPrefix: ['VITE_', 'GOOGLE_'],
   server: {
     proxy: {
