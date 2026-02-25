@@ -10,7 +10,7 @@ import type { ClaudeConfig } from './claude-client.js';
 // --- Arg parsing ---
 
 function parseArgs(argv: string[]): { port: number; host: string; noBrowser: boolean } {
-  let port = 8001;
+  let port = 8000;
   let host = '127.0.0.1';
   let noBrowser = false;
 
