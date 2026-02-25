@@ -1,0 +1,15 @@
+schemaVersion: 1
+
+enabledWorkflows:
+  - "simulator"
+  - "debugging"
+  - "ui-automation"
+  - "device"
+  - "macos"
+  - "swift-package"
+  - "project-scaffolding"
+  - "xcode-ide"
+  - "simulator-management"
+  - "doctor"
+
+experimentalWorkflowDiscovery: true

@@ -41,8 +41,16 @@ struct SessionListView: View {
                 }
             }
             ToolbarItem(placement: .topBarLeading) {
-                NavigationLink(destination: SettingsSheet()) {
-                    Image(systemName: "gear")
+                HStack(spacing: 12) {
+                    NavigationLink(destination: SettingsSheet()) {
+                        Image(systemName: "gear")
+                    }
+                    NavigationLink(destination: GeminiTestView()) {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                    }
+                    NavigationLink(destination: DesignCatalog()) {
+                        Image(systemName: "paintpalette")
+                    }
                 }
             }
         }

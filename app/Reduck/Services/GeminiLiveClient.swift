@@ -303,12 +303,15 @@ final class GeminiLiveClient {
 
         // Send setup
         let setupData = try encoder.encode(SetupEnvelope(setup: config))
-        try await ws.send(.string(String(data: setupData, encoding: .utf8)!))
+        let setupString = String(data: setupData, encoding: .utf8)!
+        print("[GeminiLive] sending setup: \(setupString.prefix(500))")
+        try await ws.send(.string(setupString))
 
         // First message must be setupComplete
         let first = try await ws.receive()
         switch first {
         case .string(let text):
+            print("[GeminiLive] first message: \(text.prefix(500))")
             guard let data = text.data(using: .utf8),
                   let msg = try? JSONDecoder().decode(Gemini.ServerMessage.self, from: data),
                   msg.setupComplete != nil else {

@@ -10,6 +10,7 @@
 		174E5A778CB5E04A3B4B3070 /* Message.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C1921E0120125B85A99D1F5 /* Message.swift */; };
 		19EA5B6C2B89D9FDD4E6009B /* SessionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C631E3889CC09A20C753280 /* SessionListView.swift */; };
 		219BD3248CB5800314543F26 /* ToolUseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C526FAD8D804E7712CAA00 /* ToolUseView.swift */; };
+		244F6BABE37D01C2308AB6B8 /* DesignCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A700A760ACE3F4F600BAC9E /* DesignCatalog.swift */; };
 		38C66E8C3D29AE83E1FFC501 /* ChatBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8269F8440E8F1CD5539C4A5E /* ChatBubbleView.swift */; };
 		3AAE2AFEEEAF1754C7A82E20 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581A3D9744FDF22F2D19C109 /* SettingsStore.swift */; };
 		3BA5F7D78B6B6EA955F01652 /* GeminiLiveClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E361E7768B4B4A46B701FF86 /* GeminiLiveClient.swift */; };
@@ -22,6 +23,7 @@
 		C78F7A4C0C1BCE886F149F8F /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 48ADDD5040F0911FEFE36B29 /* MarkdownUI */; };
 		D1C210ECECCD2C8A58877386 /* ReduckApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21B719C7CB97CBA5875C8F6A /* ReduckApp.swift */; };
 		D5A474C7FCD8746ECA17A7B1 /* ContentBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA05DC5BAC89BA1E1673A9EB /* ContentBlock.swift */; };
+		D9FE51827738519AF9D430DA /* GeminiTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1DC3069A09F56A12B3BCFB4 /* GeminiTestView.swift */; };
 		EC8149B450EAE0ED62345782 /* LiveTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC3D2CAFA733E15EC1175E3B /* LiveTypes.swift */; };
 /* End PBXBuildFile section */
 
@@ -32,6 +34,7 @@
 		21174E0D9A75E2CC2DD58B23 /* SettingsSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSheet.swift; sourceTree = "<group>"; };
 		21B719C7CB97CBA5875C8F6A /* ReduckApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReduckApp.swift; sourceTree = "<group>"; };
 		2665DFCC4D9AD3E27D6D1CEE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		3A700A760ACE3F4F600BAC9E /* DesignCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignCatalog.swift; sourceTree = "<group>"; };
 		44C526FAD8D804E7712CAA00 /* ToolUseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolUseView.swift; sourceTree = "<group>"; };
 		4770D98833FCE799E53667AD /* Reduck.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Reduck.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		50E0622A484EF997D3D7F078 /* SessionInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionInfo.swift; sourceTree = "<group>"; };
@@ -40,6 +43,7 @@
 		89DE497EED8C3E1F5ABC7DE0 /* LiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveView.swift; sourceTree = "<group>"; };
 		BA05DC5BAC89BA1E1673A9EB /* ContentBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentBlock.swift; sourceTree = "<group>"; };
 		CC3D2CAFA733E15EC1175E3B /* LiveTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTypes.swift; sourceTree = "<group>"; };
+		E1DC3069A09F56A12B3BCFB4 /* GeminiTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiTestView.swift; sourceTree = "<group>"; };
 		E361E7768B4B4A46B701FF86 /* GeminiLiveClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiLiveClient.swift; sourceTree = "<group>"; };
 		E651F842E4C15516F013C8C8 /* MessageHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageHelpers.swift; sourceTree = "<group>"; };
 		FA8F62E2E73EFC5276C28602 /* LiveStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveStore.swift; sourceTree = "<group>"; };
@@ -114,6 +118,8 @@
 			isa = PBXGroup;
 			children = (
 				8269F8440E8F1CD5539C4A5E /* ChatBubbleView.swift */,
+				3A700A760ACE3F4F600BAC9E /* DesignCatalog.swift */,
+				E1DC3069A09F56A12B3BCFB4 /* GeminiTestView.swift */,
 				89DE497EED8C3E1F5ABC7DE0 /* LiveView.swift */,
 				1C631E3889CC09A20C753280 /* SessionListView.swift */,
 				21174E0D9A75E2CC2DD58B23 /* SettingsSheet.swift */,
@@ -197,7 +203,9 @@
 				38C66E8C3D29AE83E1FFC501 /* ChatBubbleView.swift in Sources */,
 				D5A474C7FCD8746ECA17A7B1 /* ContentBlock.swift in Sources */,
 				AA192FD4F67E48E3BD7FBED3 /* ConverseClient.swift in Sources */,
+				244F6BABE37D01C2308AB6B8 /* DesignCatalog.swift in Sources */,
 				3BA5F7D78B6B6EA955F01652 /* GeminiLiveClient.swift in Sources */,
+				D9FE51827738519AF9D430DA /* GeminiTestView.swift in Sources */,
 				702D3C609949EB0DE3D3AF1A /* LiveStore.swift in Sources */,
 				EC8149B450EAE0ED62345782 /* LiveTypes.swift in Sources */,
 				3E231E17EB232B949A8D7E6E /* LiveView.swift in Sources */,
