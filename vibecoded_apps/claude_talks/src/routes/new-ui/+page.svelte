@@ -50,6 +50,20 @@
   let renaming = $state(false);
   let renameInput = $state('');
 
+  // Editable transcription state (approval mode)
+  let editing = $state(false);
+  let originalApprovalText = $state('');
+
+  // Typing animation for recording mode
+  let typingInterval: ReturnType<typeof setInterval> | undefined;
+
+  // Settings popover
+  let settingsOpen = $state(false);
+  let inputMuted = $state(false);
+  let outputMuted = $state(false);
+  let transcriptionMode = $state<'direct' | 'review'>('review');
+  let permissionMode = $state<'plan' | 'accept-edits'>('plan');
+
   function startRename() {
     renameInput = sessionTitle;
     renaming = true;
@@ -113,13 +127,51 @@
 
   // Sync inputText from scenario state (single effect to avoid race conditions)
   $effect(() => {
+    if (typingInterval) { clearInterval(typingInterval); typingInterval = undefined; }
+
     if (pendingApproval) {
       inputText = pendingApproval.instruction;
+      originalApprovalText = pendingApproval.instruction;
+      editing = false;
+    } else if (inputMode === 'recording' && pendingInput) {
+      // Typing animation: reveal text character by character
+      const fullText = pendingInput;
+      let charIndex = 0;
+      inputText = '';
+      editing = false;
+      typingInterval = setInterval(() => {
+        charIndex++;
+        inputText = fullText.slice(0, charIndex);
+        if (charIndex >= fullText.length) {
+          clearInterval(typingInterval);
+          typingInterval = undefined;
+        }
+      }, 40);
     } else {
       inputText = pendingInput || '';
+      editing = false;
     }
-    requestAnimationFrame(() => autoGrow());
+    // Clear any leftover inline height from previous scenario
+    if (textareaEl) textareaEl.style.height = '';
+
+    return () => {
+      if (typingInterval) { clearInterval(typingInterval); typingInterval = undefined; }
+    };
   });
+
+  let inputTip = $derived(
+    inputMode === 'review' ? 'Say <span class="tip-tag">Send</span> or <span class="tip-tag">Clear</span>' :
+    inputMode === 'recording' ? 'Say <span class="tip-tag">Stop</span> to end recording' :
+    inputMode === 'streaming' ? 'Say <span class="tip-tag">Stop</span> to interrupt' :
+    inputText.trim() ? 'Press Enter to send' :
+    'Use voice or type your request'
+  );
+
+  // Waveform bar heights (matching voice waveform envelope from reference image)
+  // Short edges → tall center with natural variation
+  const WAVE_HEIGHTS = [
+    2,4,6,8,4,11,7,15,10,19,12,22,16,24,14,20,18,12,19,15,10,14,7,11,6,8,4,4,2,2
+  ];
 
   let currentPlaceholder = $derived(
     inputMode === 'streaming' ? 'Wait for the agent to finish or say "Stop"' :
@@ -137,20 +189,33 @@
   function clearInput() {
     inputText = '';
     if (textareaEl) {
-      textareaEl.style.height = 'auto';
+      textareaEl.style.height = '';
       textareaEl.focus();
     }
   }
 
   function autoGrow() {
     if (!textareaEl) return;
-    if (!inputText.trim()) {
-      textareaEl.style.height = '';
-      return;
+    // Always reset to natural height first
+    textareaEl.style.height = '';
+    if (!inputText.trim()) return;
+    // Only set explicit height if content overflows natural size
+    if (textareaEl.scrollHeight > textareaEl.clientHeight) {
+      const maxH = window.innerHeight * 0.5;
+      textareaEl.style.height = Math.min(textareaEl.scrollHeight, maxH) + 'px';
     }
-    textareaEl.style.height = 'auto';
-    const maxH = window.innerHeight * 0.5;
-    textareaEl.style.height = Math.min(textareaEl.scrollHeight, maxH) + 'px';
+  }
+
+  function onTextareaFocus() {
+    if (inputMode === 'review') {
+      editing = true;
+    }
+  }
+
+  function onTextareaBlur() {
+    if (inputMode === 'review' && inputText === originalApprovalText) {
+      editing = false;
+    }
   }
 </script>
 
@@ -314,59 +379,102 @@
 
         <!-- Unified input area -->
         <div class="input-area">
-          <div class="input-box" class:recording={inputMode === 'recording'} class:review={inputMode === 'review'} class:streaming={inputMode === 'streaming'}>
+          <div class="input-box" class:recording={inputMode === 'recording'} class:review={inputMode === 'review'} class:streaming={inputMode === 'streaming'} class:editing>
             <textarea
               bind:this={textareaEl}
               bind:value={inputText}
               oninput={autoGrow}
+              onfocus={onTextareaFocus}
+              onblur={onTextareaBlur}
               placeholder={currentPlaceholder}
               class:placeholder-fade={placeholderFade}
-              rows="1"
               readonly={inputMode === 'recording' || inputMode === 'streaming'}
             ></textarea>
 
             <div class="controls-row">
-              {#if inputMode === 'recording'}
-                <!-- Recording: mute toggle left, stop right -->
-                <button class="ctrl-btn" class:muted title={muted ? 'Unmute' : 'Mute'} onclick={() => muted = !muted}>
-                  {#if muted}
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                      <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-                    </svg>
-                  {:else}
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-                    </svg>
-                  {/if}
+              {#if inputMode === 'idle' || inputMode === 'streaming'}
+                <!-- Add files button (idle/streaming only) -->
+                <button class="ghost-btn" type="button" title="Add attachment">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+                  </svg>
                 </button>
-                <span class="waveform-indicator">
-                  <span></span><span></span><span></span><span></span>
-                </span>
-                <span class="controls-spacer"></span>
+              {/if}
+
+              <!-- Settings button -->
+              <div class="settings-wrapper">
+                <button class="ghost-btn" type="button" title="Settings" onclick={() => settingsOpen = !settingsOpen}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                  </svg>
+                </button>
+                {#if settingsOpen}
+                  <!-- svelte-ignore a11y_click_events_have_key_events -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div class="settings-backdrop" onclick={() => settingsOpen = false}></div>
+                  <div class="settings-popover">
+                    <div class="settings-section">
+                      <span class="settings-section-title">Audio</span>
+                      <label class="settings-toggle">
+                        <span class="settings-label">
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="var(--color-grey-400)"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></svg>
+                          Input
+                        </span>
+                        <button class="toggle-switch" class:active={!inputMuted} type="button" onclick={() => inputMuted = !inputMuted} aria-label="Toggle input audio">
+                          <span class="toggle-knob"></span>
+                        </button>
+                      </label>
+                      <label class="settings-toggle">
+                        <span class="settings-label">
+                          <svg viewBox="0 0 24 24" width="14" height="14" fill="var(--color-grey-400)"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                          Output
+                        </span>
+                        <button class="toggle-switch" class:active={!outputMuted} type="button" onclick={() => outputMuted = !outputMuted} aria-label="Toggle output audio">
+                          <span class="toggle-knob"></span>
+                        </button>
+                      </label>
+                    </div>
+                    <div class="settings-divider"></div>
+                    <div class="settings-section">
+                      <span class="settings-section-title">Transcription Mode</span>
+                      <select class="settings-select" bind:value={transcriptionMode}>
+                        <option value="direct">Direct</option>
+                        <option value="review">Review</option>
+                      </select>
+                    </div>
+                    <div class="settings-divider"></div>
+                    <div class="settings-section">
+                      <span class="settings-section-title">Permission Mode</span>
+                      <select class="settings-select" bind:value={permissionMode}>
+                        <option value="plan">Plan</option>
+                        <option value="accept-edits">Accept Edits</option>
+                      </select>
+                    </div>
+                  </div>
+                {/if}
+              </div>
+
+              {#if inputMode === 'recording'}
+                <!-- Recording: waveform center, stop right -->
+                <div class="waveform">
+                  {#each WAVE_HEIGHTS as h, i}
+                    <span style="--h: {h}px; animation-delay: {(i * 0.08) % 1.6}s"></span>
+                  {/each}
+                </div>
                 <button class="primary-btn stop-btn" title="Stop recording">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
                     <rect x="6" y="6" width="12" height="12" rx="2"/>
                   </svg>
                 </button>
               {:else if inputMode === 'review'}
-                <!-- Review: attachment left, model select + clear + send right -->
-                <button class="ctrl-btn" title="Add attachment">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                  </svg>
-                </button>
-                <span class="controls-spacer"></span>
-                <select class="model-select" bind:value={selectedModel}>
-                  <option value="opus">Opus</option>
-                  <option value="sonnet">Sonnet</option>
-                  <option value="haiku">Haiku</option>
-                </select>
-                <button class="ctrl-btn clear-btn" title="Clear" onclick={clearInput}>
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
+                <!-- Review: waveform center (unless editing), clear + send right -->
+                <div class="waveform">
+                  {#each WAVE_HEIGHTS as h, i}
+                    <span style="--h: {h}px; animation-delay: {(i * 0.08) % 1.6}s"></span>
+                  {/each}
+                </div>
+                <button class="text-btn clear-btn" onclick={clearInput}>Clear</button>
                 <button class="primary-btn send-btn" title="Send">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
                     <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -381,12 +489,7 @@
                   </svg>
                 </button>
               {:else}
-                <!-- Idle: attachment left, model select + mic/send right -->
-                <button class="ctrl-btn" title="Add attachment">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                    <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-                  </svg>
-                </button>
+                <!-- Idle: spacer + model select + mic/send -->
                 <span class="controls-spacer"></span>
                 <select class="model-select" bind:value={selectedModel}>
                   <option value="opus">Opus</option>
@@ -409,6 +512,7 @@
               {/if}
             </div>
           </div>
+          <p class="input-tip">{@html inputTip}</p>
         </div>
       </div>
     </div>
@@ -901,24 +1005,45 @@
     background: linear-gradient(to bottom, transparent, var(--background-color) 1rem);
   }
 
+  .input-tip {
+    margin: 10px 0 0;
+    text-align: center;
+    font-size: var(--font-size-caption);
+    color: var(--color-grey-400);
+  }
+
+  /* Tag (matching Reduck Tag neutral variant) */
+  .input-tip :global(.tip-tag) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 20px;
+    padding: 0 6px;
+    font-weight: 500;
+    line-height: 1.5em;
+    white-space: nowrap;
+    background: var(--color-grey-600);
+    color: var(--color-grey-200);
+  }
+
   .input-box {
+    position: relative;
     display: flex;
     flex-direction: column;
     background: transparent;
     border: 1px solid var(--color-grey-600);
     border-radius: 16px;
-    transition: border-color 200ms;
+    transition: border-color 200ms, background 200ms;
   }
 
   .input-box:hover { border-color: var(--color-grey-500); }
   .input-box:focus-within { border-color: var(--color-orange-400); }
 
-  /* Recording state: pulsing orange border + orange glow */
+  /* Recording state: pulsing orange border, no glow */
   .input-box.recording {
     border-color: var(--color-orange-400);
     background: rgba(249, 115, 22, 0.15);
-    box-shadow: 0 0 20px rgba(249, 115, 22, 0.35), 0 0 8px rgba(249, 115, 22, 0.2), 0 0 40px rgba(249, 115, 22, 0.1);
-    animation: border-pulse 2s ease-in-out infinite;
+    animation: border-pulse 1.5s ease-in-out infinite;
   }
 
   @keyframes border-pulse {
@@ -926,10 +1051,32 @@
     50% { border-color: var(--color-orange-200); }
   }
 
-  /* Review state: static orange border (flash from recording) */
+  /* Review state: orange bg like recording, no glow */
   .input-box.review {
     border-color: var(--color-orange-400);
+    background: rgba(249, 115, 22, 0.15);
     animation: none;
+  }
+
+  /* Italic text for voice modes */
+  .input-box.recording textarea,
+  .input-box.review textarea {
+    font-style: italic;
+  }
+
+  /* Recording: pulsing text color to signal live transcription */
+  .input-box.recording textarea {
+    color: var(--color-orange-200);
+    animation: transcription-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes transcription-pulse {
+    0%, 100% { color: var(--color-orange-200); }
+    50% { color: var(--color-orange-300); }
+  }
+
+  .input-box.review.editing textarea {
+    font-style: normal;
   }
 
   /* Streaming state: dimmed input, stop button active */
@@ -956,6 +1103,7 @@
     box-shadow: none;
     -webkit-appearance: none;
     resize: none;
+    field-sizing: content;
     font-size: var(--font-size-body);
     font-family: inherit;
     line-height: 1.5;
@@ -988,7 +1136,7 @@
     display: flex;
     align-items: center;
     padding: 0.2rem 0.5rem 0.45rem;
-    gap: 0.35rem;
+    gap: 8px;
   }
 
   .controls-spacer { flex: 1; }
@@ -1015,16 +1163,39 @@
   .clear-btn:hover { color: var(--color-red-300); background: var(--color-red-500-translucent-18); }
   .clear-btn:active { background: var(--color-red-500-translucent-28); }
 
+  /* Text button (e.g. "Clear" in review mode) */
+  .text-btn {
+    background: transparent;
+    border: none;
+    color: var(--color-grey-50);
+    font-size: var(--font-size-small);
+    font-weight: 500;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 0 8px;
+    min-height: 32px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    transition: color 200ms, background 200ms;
+  }
+
+  .text-btn:hover {
+    color: var(--color-grey-200);
+    background: var(--color-grey-800);
+  }
+
   .model-select {
     font-size: var(--font-size-small);
     font-weight: 500;
     color: var(--color-grey-400);
-    border: 1px solid var(--color-grey-600);
+    border: none;
     border-radius: 8px;
     background: transparent;
     cursor: pointer;
     padding: 0.15rem 0.4rem;
-    transition: color 200ms, border-color 200ms;
+    margin-right: 4px;
+    transition: color 200ms;
   }
 
   .model-select option {
@@ -1032,33 +1203,35 @@
     color: var(--text-color);
   }
 
-  .model-select:hover { color: var(--color-grey-200); border-color: var(--color-grey-500); }
+  .model-select:hover { color: var(--color-grey-200); }
 
-  /* Waveform indicator (recording) */
-  .waveform-indicator {
+  /* Voice waveform (recording + review) */
+  .waveform {
+    flex: 1;
     display: flex;
     align-items: center;
-    gap: 2px;
-    height: 16px;
-    margin-left: 4px;
+    justify-content: center;
+    gap: 3px;
+    height: 24px;
+    overflow: hidden;
   }
 
-  .waveform-indicator span {
+  .waveform span {
     display: block;
-    width: 3px;
+    width: 2px;
+    flex-shrink: 0;
     border-radius: 1px;
-    background: var(--color-orange-400);
-    animation: waveform 1.2s ease-in-out infinite;
+    background: var(--color-orange-100);
+    height: var(--h, 4px);
+    animation: wave-voice 1.6s ease-in-out infinite alternate;
   }
 
-  .waveform-indicator span:nth-child(1) { height: 8px; animation-delay: 0s; }
-  .waveform-indicator span:nth-child(2) { height: 14px; animation-delay: 0.15s; }
-  .waveform-indicator span:nth-child(3) { height: 10px; animation-delay: 0.3s; }
-  .waveform-indicator span:nth-child(4) { height: 6px; animation-delay: 0.45s; }
-
-  @keyframes waveform {
-    0%, 100% { transform: scaleY(0.5); }
-    50% { transform: scaleY(1); }
+  @keyframes wave-voice {
+    0% { transform: scaleY(0.3); }
+    25% { transform: scaleY(1); }
+    50% { transform: scaleY(0.5); }
+    75% { transform: scaleY(0.9); }
+    100% { transform: scaleY(0.4); }
   }
 
   /* Primary buttons (Reduck medium: 32px, border-radius 10px) */
@@ -1154,5 +1327,142 @@
   @keyframes toast-in {
     from { opacity: 0; transform: translateX(-50%) translateY(-0.5rem); }
     to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+
+  /* ============================================
+     SETTINGS POPOVER
+     ============================================ */
+  .settings-wrapper {
+    position: relative;
+  }
+
+  .ghost-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px; min-height: 32px;
+    background: transparent;
+    border: none;
+    color: var(--color-grey-300);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 8px;
+    transition: color 200ms, background 200ms;
+  }
+
+  .ghost-btn:hover {
+    color: var(--color-grey-100);
+    background: var(--color-grey-700);
+  }
+
+  .settings-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-dropdown);
+  }
+
+  .settings-popover {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    background: var(--color-grey-900);
+    border: 1px solid var(--color-grey-600);
+    border-radius: 12px;
+    padding: 12px;
+    min-width: 220px;
+    z-index: var(--z-popover);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .settings-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .settings-section-title {
+    font-size: var(--font-size-caption);
+    font-weight: 600;
+    color: var(--color-grey-400);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .settings-divider {
+    height: 1px;
+    background: var(--color-grey-700);
+    margin: 8px 0;
+  }
+
+  .settings-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+  }
+
+  .settings-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--font-size-body);
+    color: var(--text-color);
+  }
+
+  /* Toggle switch */
+  .toggle-switch {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    border: none;
+    background: var(--color-grey-600);
+    cursor: pointer;
+    padding: 0;
+    transition: background 200ms;
+  }
+
+  .toggle-switch.active {
+    background: var(--color-orange-400);
+  }
+
+  .toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--color-grey-50);
+    transition: transform 200ms;
+  }
+
+  .toggle-switch.active .toggle-knob {
+    transform: translateX(16px);
+  }
+
+  .settings-select {
+    font-size: var(--font-size-body);
+    font-family: inherit;
+    color: var(--text-color);
+    background: var(--color-grey-800);
+    border: 1px solid var(--color-grey-600);
+    border-radius: 8px;
+    padding: 6px 8px;
+    cursor: pointer;
+    transition: border-color 200ms;
+  }
+
+  .settings-select:hover {
+    border-color: var(--color-grey-500);
+  }
+
+  .settings-select option {
+    background: var(--color-grey-800);
+    color: var(--text-color);
   }
 </style>
