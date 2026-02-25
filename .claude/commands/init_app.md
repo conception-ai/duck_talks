@@ -30,6 +30,10 @@ Batch read them all in a single read. You must read context in a single turn.
 | app/Reduck/Views/ToolUseView.swift | Expandable tool_use/tool_result display |
 | app/Reduck/Views/SettingsSheet.swift | Settings form (server URL, API key, mode, model, prompt) |
 | app/Reduck/Info.plist | ATS localhost exception, mic/speech usage descriptions |
+| src/server/routes.ts | Express backend — all API endpoints the iOS app calls. SSE streaming protocol |
+| src/server/claude-client.ts | TS Agent SDK wrapper. `Claude.converse()` async generator — what `/api/converse` invokes |
+| src/shared/types.ts | Backend types — `ContentBlock` union, `SessionEntry`. iOS models must match these |
+| src/shared/models.ts | Session file ops — `Conversation`, `forkSession()`. Needed for edit/back feature |
 
 ## Svelte source files (read when porting a specific component)
 
@@ -137,13 +141,5 @@ xcrun simctl shutdown booted                             # shutdown all
 open -a Simulator                                        # open Simulator.app
 ```
 
-## Progress
-
-See `~/.claude/plans/joyful-herding-widget.md` for full phase breakdown.
-
-**Done:** Phases 1-2 — scaffold, models, SSE streaming, session list, chat UI, text input.
-**Next:** Phase 3 — Gemini Live voice relay (GeminiLiveService + AudioManager).
-
 ## Instructions
 
-Read, digest then ask me questions if needed.
