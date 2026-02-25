@@ -97,13 +97,10 @@ def _read_tail(path: str, nbytes: int = 32768) -> list[dict[str, object]]:
     return result
 
 
-def _session_preview(path: str) -> tuple[str, str, str]:
-    """Fast extraction of (name, summary, timestamp) from tail of JSONL.
-
-    Reads last 32KB instead of parsing the full file through Pydantic.
-    Returns (last_user_text, last_assistant_text, timestamp).
-    """
-    entries = _read_tail(path)
+def _extract_preview(
+    entries: list[dict[str, object]],
+) -> tuple[str, str, str]:
+    """Extract (name, summary, timestamp) from parsed JSONL entries (newest-first)."""
     ts = ""
     name = ""
     summary = ""
@@ -138,6 +135,27 @@ def _session_preview(path: str) -> tuple[str, str, str]:
         if ts and name and summary:
             break
     return name, summary, ts
+
+
+_TAIL_START = 32768
+_TAIL_MAX = 262144
+
+
+def _session_preview(path: str) -> tuple[str, str, str]:
+    """Extract (name, summary, timestamp) from the tail of a JSONL file.
+
+    Starts at 32KB and doubles up to 256KB until a user message with
+    string content is found. Handles long sessions with large tool-result
+    entries that push human messages out of a fixed-size window.
+    """
+    nbytes = _TAIL_START
+    while nbytes <= _TAIL_MAX:
+        entries = _read_tail(path, nbytes)
+        name, summary, ts = _extract_preview(entries)
+        if name:
+            return name, summary, ts
+        nbytes *= 2
+    return "", "", ts
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
