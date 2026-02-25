@@ -1,16 +1,16 @@
 /**
  * Render-relevant domain types shared across routes.
  * No runtime code — everything here is a type or interface.
+ *
+ * ContentBlock is the single source of truth from src/shared/types.ts.
+ * UI-only types (PendingTool, Status, etc.) stay local.
  */
 
-// --- CC message types (1:1 with models.py) ---
+// --- CC message types (re-exported from shared) ---
 
-export type ContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'thinking'; thinking: string }
-  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string }
-  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+export type { ContentBlock } from '../../shared/types';
+
+import type { ContentBlock } from '../../shared/types';
 
 export interface Message {
   uuid?: string;

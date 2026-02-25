@@ -39,7 +39,12 @@ export function buildToolResultMap(msgs: Message[]): Map<string, string> {
   for (const msg of msgs) {
     if (typeof msg.content === 'string') continue;
     for (const b of msg.content) {
-      if (b.type === 'tool_result') map.set(b.tool_use_id, b.content);
+      if (b.type === 'tool_result') {
+        map.set(
+          b.tool_use_id,
+          typeof b.content === 'string' ? b.content : JSON.stringify(b.content),
+        );
+      }
     }
   }
   return map;
