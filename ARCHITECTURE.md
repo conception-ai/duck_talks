@@ -10,17 +10,27 @@ User ←→ Voice Relay ←→ Agent ←→ Codebase
          Audio I/O
 ```
 
-Five roles, one key boundary: the **SSE protocol** between client and server. Everything client-side of it is constant across deployments. Everything server-side varies.
+Five roles, two connections from the client:
+
+1. **SSE** to the Reduck server (agent instructions + session management)
+2. **WebSocket** directly to Gemini (voice relay + TTS — latency-sensitive)
+
+The SSE protocol is the **deployment boundary** for the agent. Everything server-side of it varies by deployment mode. The Gemini connection is always direct from client, but in managed mode the server vends ephemeral tokens instead of the client holding API keys.
 
 ```
               SSE boundary
                   │
   Client          │    Server
   ───────         │    ──────
-  Voice Relay     │    Agent backend
-  TTS             │    Session store
-  Audio I/O       │    Auth (managed only)
-  UI              │
+  UI              │    Agent backend
+  Audio I/O       │    Session store
+                  │    Auth (managed only)
+                  │    Token vending (managed only)
+                  │
+           Direct to Gemini
+           ─────────────────
+           Voice Relay (WS)
+           TTS (WS)
 ```
 
 ## Roles
@@ -142,13 +152,28 @@ Requires: Claude Code CLI, API keys in .env, Node.js.
 
 ### Managed
 
-Server is hosted. Agent runs remotely. Multi-tenant with auth.
+Server is hosted. Agent runs remotely. Multi-tenant with auth. The client still connects directly to Gemini for voice/TTS (latency), but the server vends short-lived tokens instead of the client holding API keys.
 
 ```
-Browser ──SSE──→ api.example.com ──API──→ Remote Agent
-                      │                       │
-                 Auth + routing          Remote storage
+                       SSE (agent)
+Browser ──────────────────────────→ api.example.com ──API──→ Remote Agent
+    │                                     │                       │
+    │   WebSocket (voice + TTS)           │ Auth + routing    Remote storage
+    └─────────────────────────────→ Gemini API
+                                      ↑
+                               ephemeral token
+                            (vended by backend)
 ```
+
+**Ephemeral tokens** solve the key management problem. The backend holds the real Gemini API key; the client gets a scoped, short-lived token (~1 min to start a session, ~30 min lifetime). The flow:
+
+1. Client authenticates with Reduck backend
+2. Backend calls `client.authTokens.create()` with constraints (model, modalities, `uses: 1`)
+3. Backend returns ephemeral token to client
+4. Client passes token to `GoogleGenAI({ apiKey: token.name })` — same SDK, same code path
+5. On token expiry, client requests a new one (session resumption keeps the WebSocket alive)
+
+Token constraints can lock the model, temperature, and modalities server-side — the client can't override them even with the token. This means system prompts and tool declarations can be enforced by the backend.
 
 **What changes:**
 
@@ -157,8 +182,11 @@ Browser ──SSE──→ api.example.com ──API──→ Remote Agent
 | `claude-client.ts` | subprocess → remote API call |
 | `models.ts` | `readFileSync` → API call |
 | `routes.ts` | no auth → auth middleware, per-user routing |
+| _(new)_ `routes.ts` | — → `GET /api/auth/gemini-token` endpoint |
+| `gemini.ts` | `apiKey` from UI → ephemeral token from backend |
+| `tts-session.ts` | same `apiKey` change |
 
-**What stays identical:** all client code (`gemini.ts`, `tts-session.ts`, `audio.ts`, `converse.ts`), SSE protocol, port interfaces.
+**What stays identical:** client orchestration logic (`gemini.ts` message handling, `converse.ts` SSE consumer, `audio.ts`), SSE protocol, port interfaces. The `GoogleGenAI` SDK call is identical — only the key source changes.
 
 ### Interfaces to extract
 
