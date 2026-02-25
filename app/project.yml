@@ -1,0 +1,30 @@
+name: Reduck
+options:
+  bundleIdPrefix: dev.conception
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    INFOPLIST_FILE: Reduck/Info.plist
+packages:
+  MarkdownUI:
+    url: https://github.com/gonzalezreal/swift-markdown-ui
+    from: "2.4.0"
+targets:
+  Reduck:
+    type: application
+    platform: iOS
+    sources:
+      - Reduck
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.conception.reduck
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: Reduck/Info.plist
+    dependencies:
+      - package: MarkdownUI
