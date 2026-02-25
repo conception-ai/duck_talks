@@ -1,0 +1,24 @@
+{
+  "name": "reduck",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Voice interface for Claude Code",
+  "scripts": {
+    "dev": "tsx src/server/cli.ts",
+    "build": "tsc -p tsconfig.server.json",
+    "check": "tsc -p tsconfig.server.json --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.56",
+    "cors": "^2.8.5",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.10.1",
+    "tsx": "^4.19.4",
+    "typescript": "~5.9.3"
+  }
+}

@@ -11,3 +11,4 @@ vibecoded_apps/claude_talks/.env
 cc-relay/
 .logs/
 .env
+~/.claude/
