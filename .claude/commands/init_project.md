@@ -238,6 +238,7 @@ const { setup } = await import('/src/lib/test-inject.ts');
 > **VAD only**: injection relies on VAD to detect end-of-speech from silence.
 >
 > **Legacy: IndexedDB replay** (deprecated, still works): `injectFromDB(index)` replays previously recorded utterances from IndexedDB. Free and instant but limited to whatever was recorded in past sessions. Use `listReplays()` to see available recordings.
+
 ## Instructions
 
 Read, digest then ask me questions if needed.
