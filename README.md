@@ -21,7 +21,7 @@ txt = raw stream of tokens
 
 ## Demo
 
-<video src="public/demo.mp4" width="600" controls></video>
+[![Demo](https://cdn.loom.com/sessions/thumbnails/d1306d2768ed419092824e4420038687-900818bacd366771-full-play.gif)](https://www.loom.com/share/d1306d2768ed419092824e4420038687)
 
 ## Quick start
 
