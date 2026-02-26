@@ -18,10 +18,10 @@
     buildToolResultMap,
     isToolResultOnly,
   } from '../../lib/message-helpers';
-  import reduckLogo from '../../assets/Reduck_Brand_Mark_RGB_Inverse.svg';
+  import duckTalkLogo from '../../assets/duck_talk_logo.svg';
   import './styles/colorPalette.css';
   import './styles/fontSizes.css';
-  import './styles/reduck-theme.css';
+  import './styles/duck-talk-theme.css';
 
   setupRecorder();
 
@@ -309,13 +309,13 @@
   }
 }} />
 
-<div class="app-layout reduck-theme">
+<div class="app-layout duck-talk-theme">
   <!-- Sidebar -->
   <header class="sidebar" class:mounted class:open={sidebarOpen}>
     <div class="top-actions">
       {#if sidebarOpen}
         <a class="logo-link" aria-label="Homepage" href="#/" onclick={(e) => { e.preventDefault(); push('/'); }}>
-          <img src={reduckLogo} alt="Reduck" width="31" height="31" />
+          <img src={duckTalkLogo} alt="Duck Talk" width="31" height="31" />
         </a>
         <button class="sidebar-toggle-btn" type="button" onclick={() => sidebarOpen = !sidebarOpen} aria-label="Collapse sidebar">
           <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -324,7 +324,7 @@
         </button>
       {:else}
         <button class="expand-sidebar-btn" type="button" aria-label="Expand sidebar" onclick={() => sidebarOpen = !sidebarOpen}>
-          <img src={reduckLogo} alt="Reduck" width="31" height="31" />
+          <img src={duckTalkLogo} alt="Duck Talk" width="31" height="31" />
         </button>
       {/if}
     </div>

@@ -1,11 +1,11 @@
-# DuckTalk
+# Duck Talk
 
 Talk to Claude Code. Hear it talk back. Approve, interrupt, or redirect — all by voice, from anywhere.
 
 The core tech: a generic a voice layer that can wrap **any** black-box agent using Live Speech models (e.g. Gemini Live, OpenAI Realtime) for low latency conversations. No modifications to the agent.
 
 ```
-              DuckTalk            Claude Code
+             Duck Talk            Claude Code
               ┌──────┐          ╔══════════════╗
 You ─speech─▶ │ STT  │ ─inst─▶  ║              ║
     ◀─audio── │ TTS  │ ◀─txt──  ║  (any agent) ║
@@ -63,7 +63,7 @@ Nothing combines all of this:
 |---|---|---|---|---|---|
 | **STT dictation** | ❌ Push-to-talk | ❌ | ❌ No response | ✅ | ✅ |
 | **MCP voice tool** | ❌ Keyboard | ✅ | ❌ After completion | ❌ Extra MCP | ❌ Custom MCP |
-| **DuckTalk** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Duck Talk** | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ## Key features
 

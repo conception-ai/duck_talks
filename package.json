@@ -1,5 +1,5 @@
 {
-  "name": "reduck",
+  "name": "duck_talk",
   "version": "0.1.0",
   "type": "module",
   "description": "Voice interface for Claude Code",

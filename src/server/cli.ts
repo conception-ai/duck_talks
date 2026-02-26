@@ -91,7 +91,7 @@ const serverConfig: ServerConfig = {
 const app = createApp(serverConfig);
 
 app.listen(port, host, () => {
-  console.info(`Reduck listening on http://${host}:${port}`);
+  console.info(`Duck Talk listening on http://${host}:${port}`);
   console.info(`Project: ${serverConfig.cwd}`);
   if (serverConfig.publicDir) {
     console.info('Serving frontend from dist/public/');

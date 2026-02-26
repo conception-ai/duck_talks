@@ -11,10 +11,10 @@
     isToolResultOnly,
   } from '../../lib/message-helpers';
   import { SCENARIOS, type Scenario } from './scenarios';
-  import reduckLogo from '../../assets/Reduck_Brand_Mark_RGB_Inverse.svg';
+  import duckTalkLogo from '../../assets/duck_talk_logo.svg';
   import './styles/colorPalette.css';
   import './styles/fontSizes.css';
-  import './styles/reduck-theme.css';
+  import './styles/duck-talk-theme.css';
 
   let scenario = $state<Scenario>(SCENARIOS[0]);
   let messages = $derived(scenario.state.messages);
@@ -301,7 +301,7 @@
     }
   }
 
-  // Tooltip action — portals a tooltip to <body> on hover (matching Reduck Tooltip)
+  // Tooltip action — portals a tooltip to <body> on hover (matching Duck Talk Tooltip)
   function tip(label: string, opts?: { kbd?: string; voice?: string }) {
     if (!opts || (!opts.kbd && !opts.voice)) return label;
     const tags: string[] = [];
@@ -350,13 +350,13 @@
   }
 </script>
 
-<div class="app-layout reduck-theme">
+<div class="app-layout duck-talk-theme">
   <!-- Sidebar (copied from storybook Header pattern) -->
   <header class="sidebar" class:mounted class:open={sidebarOpen}>
     <div class="top-actions">
       {#if sidebarOpen}
         <a class="redirect-homepage-link" aria-label="Homepage" href="#/" onclick={(e) => { e.preventDefault(); push('/'); }}>
-          <img src={reduckLogo} alt="Reduck" width="31" height="31" />
+          <img src={duckTalkLogo} alt="Duck Talk" width="31" height="31" />
         </a>
         <button class="sidebar-toggle-btn" type="button" onclick={() => sidebarOpen = !sidebarOpen} aria-label="Collapse sidebar" use:tooltip={'Collapse sidebar'}>
           <!-- sidebar icon -->
@@ -367,7 +367,7 @@
         </button>
       {:else}
         <button class="expand-sidebar-button" type="button" aria-label="Expand sidebar" use:tooltip={'Expand sidebar'} onclick={() => sidebarOpen = !sidebarOpen}>
-          <img src={reduckLogo} alt="Reduck" width="31" height="31" />
+          <img src={duckTalkLogo} alt="Duck Talk" width="31" height="31" />
         </button>
       {/if}
     </div>
@@ -1229,7 +1229,7 @@
     color: var(--color-grey-400);
   }
 
-  /* Tag (matching Reduck Tag neutral variant) */
+  /* Tag (matching Duck Talk Tag neutral variant) */
   .input-tip :global(.tip-tag) {
     display: inline-flex;
     align-items: center;
@@ -1258,7 +1258,7 @@
   }
 
 
-  /* Portal tooltip (matching Reduck Tooltip component) — injected into <body> */
+  /* Portal tooltip (matching Duck Talk Tooltip component) — injected into <body> */
   :global(.portal-tooltip) {
     position: fixed;
     text-align: center;
@@ -1601,7 +1601,7 @@
     100% { transform: scaleY(0.4); }
   }
 
-  /* Primary buttons (Reduck medium: 32px, border-radius 10px) */
+  /* Primary buttons (Duck Talk medium: 32px, border-radius 10px) */
   .primary-btn {
     flex-shrink: 0;
     min-width: 32px; max-width: 32px;

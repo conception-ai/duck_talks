@@ -5,11 +5,20 @@
 
 import type { Correction } from '../types';
 
-const STORAGE_KEY = 'claude-talks:corrections';
+const STORAGE_KEY = 'duck_talk:corrections';
+const OLD_STORAGE_KEY = 'claude-talks:corrections';
 
 function load(): Correction[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    // Migrate from old key
+    if (!raw) {
+      raw = localStorage.getItem(OLD_STORAGE_KEY);
+      if (raw) {
+        localStorage.setItem(STORAGE_KEY, raw);
+        localStorage.removeItem(OLD_STORAGE_KEY);
+      }
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     const list: Record<string, unknown>[] = parsed.corrections ?? parsed;

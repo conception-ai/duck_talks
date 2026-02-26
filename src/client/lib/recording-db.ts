@@ -3,7 +3,7 @@
  * Thin CRUD wrapper — used by recorder.ts (write) and recordings page (read).
  */
 
-const DB_NAME = 'claude-talks-recordings';
+const DB_NAME = 'duck_talk_recordings';
 const STORE = 'utterances';
 
 export interface StoredRecording {

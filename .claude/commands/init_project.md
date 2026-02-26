@@ -126,11 +126,11 @@ let inputText = $state('');                        // local interactive state
 - **Two independent mute layers in TTS** (`tts-session.ts`): Internal `muted` flag (lifecycle — set by `interrupt()`, cleared by `send()`) vs `isOutputMuted()` getter (user preference — never auto-cleared). Both gate audio playback: `!muted && !isOutputMuted()`. The internal flag ensures stale audio from interrupted converse doesn't play. The user flag lets the user silence output while TTS keeps buffering/flushing normally. Don't conflate them.
 - **Waveform zeroing on input mute** (`+page.svelte`): The waveform's `AnalyserNode` reads from a separate `getUserMedia` stream — muting the PCM pipeline (gating `onChunk` in `data.svelte.ts`) doesn't affect it. The `animate()` function explicitly checks `inputMuted` and fills zeros. Without this, the waveform dances while audio is muted — confusing visual signal.
 - **Gemini API key flow**: Vite env var `VITE_GEMINI_API_KEY` in `.env` → `import.meta.env.VITE_GEMINI_API_KEY` → build-time constant in `+page.svelte` (`const apiKey = ...`). Passed to data store via `getApiKey: () => apiKey` closure. The Express server never sees or needs this key — Gemini WebSocket is browser-side only. Vite must be restarted to pick up `.env` changes (env vars are baked at build time).
-- **Nested session prevention** (`claude-client.ts`): `delete process.env['CLAUDECODE']` at import time — prevents "nested session" error when `reduck` runs inside a Claude Code terminal.
+- **Nested session prevention** (`claude-client.ts`): `delete process.env['CLAUDECODE']` at import time — prevents "nested session" error when `duck_talk` runs inside a Claude Code terminal.
 - **Session paths**: All sessions live under `~/.claude/projects/{slug}/`. The slug uses hyphens for ALL non-`[a-zA-Z0-9-]` chars — this is the CLI's own path sanitization (`path_to_slug()`). Example: `/Users/foo/my_project` → `-Users-foo-my-project`.
-- **cwd-scoped**: `reduck` is launched from a directory → that IS the project. `PROJECT_CWD = process.cwd()` at server startup. No multi-project picker.
+- **cwd-scoped**: `duck_talk` is launched from a directory → that IS the project. `PROJECT_CWD = process.cwd()` at server startup. No multi-project picker.
 - **SDK client lifetime**: Each `query()` call spawns a fresh subprocess. Use `resume=session_id` (captured from `ResultMessage.session_id`) to maintain conversation across calls.
-- **Interaction mode** (`ui.svelte.ts`): 2-way mode selector in Settings modal — `direct`, `review`. Persisted in localStorage (`claude-talks:ui` as `mode`).
+- **Interaction mode** (`ui.svelte.ts`): 2-way mode selector in Settings modal — `direct`, `review`. Persisted in localStorage (`duck_talk:ui` as `mode`).
   - **`direct`** — tool calls execute immediately, no approval UI.
   - **`review`** — single-stage approval: user sees instruction, Accept/Edit/Reject. If user edits, the diff is saved as a correction in `corrections.svelte.ts`. Acceptance can come from UI button OR voice (`webkitSpeechRecognition` via `voice-approval.ts`).
   - Main session audio is fully ignored (no player, no `outputTranscription` handler). TTS session handles all audio output independently.
@@ -153,7 +153,7 @@ let inputText = $state('');                        // local interactive state
 - **`.env` loading**: `cli.ts` has a zero-dep `.env` loader (~10 lines). Only sets vars not already in `process.env` — real env vars take precedence. Loaded before anything else in the CLI.
 - **SDK type casts**: TS Agent SDK v0.2.56 uses `BetaMessage`/`BetaRawMessageStreamEvent` types. `claude-client.ts` uses `as unknown as Record<string, unknown>` casts to extract streaming deltas. May change in future SDK versions.
 - **SDK error discrimination**: `SDKResultSuccess` has `result: string`, `SDKResultError` has `errors: string[]` (NOT `result`). Use `msg.is_error` + `'errors' in msg` to discriminate. Different from Python SDK.
-- **Old Python backend**: Archived in `archive/reduck/` for reference. Not used at runtime.
+- **Old Python backend**: Archived in `archive/duck_talk/` for reference. Not used at runtime.
 
 ## Locations & commands
 
@@ -221,7 +221,7 @@ const { setup } = await import('/src/lib/test-inject.ts');
 >      const { setup } = await import('/src/lib/test-inject.ts');
 >      setup();
 >      const { speak } = await import('/src/lib/tts.ts');
->      const key = JSON.parse(localStorage.getItem('claude-talks:ui') || '{}').apiKey;
+>      const key = JSON.parse(localStorage.getItem('duck_talk:ui') || '{}').apiKey;
 >      const { data, sampleRate } = await speak(key, 'What is the latest commit?');
 >      window.__pregenAudio = { data, sampleRate };
 >      return 'setup + TTS ready';

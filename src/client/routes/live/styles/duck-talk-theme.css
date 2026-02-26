@@ -12,7 +12,7 @@
 	--z-tooltip: 3000;
 }
 
-.reduck-theme {
+.duck-talk-theme {
 	background: var(--background-color);
 	color: var(--text-color);
 	font-family: 'Inter', sans-serif;
@@ -29,15 +29,15 @@
 	}
 }
 
-.reduck-theme *::-webkit-scrollbar {
+.duck-talk-theme *::-webkit-scrollbar {
 	width: 6px;
 }
 
-.reduck-theme *::-webkit-scrollbar-track {
+.duck-talk-theme *::-webkit-scrollbar-track {
 	background: transparent;
 }
 
-.reduck-theme *::-webkit-scrollbar-thumb {
+.duck-talk-theme *::-webkit-scrollbar-thumb {
 	background: var(--color-grey-600);
 	border-radius: 3px;
 }

@@ -15,7 +15,7 @@
  *
  *   Step 2 (after connection) — TTS alternative:
  *     const { speak } = await import('/src/lib/tts.ts');
- *     const key = JSON.parse(localStorage.getItem('claude-talks:ui') || '{}').apiKey;
+ *     const key = JSON.parse(localStorage.getItem('duck_talk:ui') || '{}').apiKey;
  *     inject((await speak(key, 'Say naturally: <prompt> OVER')).data, 24000);
  */
 

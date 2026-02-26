@@ -8,7 +8,8 @@
 import type { InteractionMode } from '../types';
 import { DEFAULT_MODEL, DEFAULT_PERMISSION_MODE, DEFAULT_SYSTEM_PROMPT } from '../defaults';
 
-const STORAGE_KEY = 'claude-talks:ui';
+const STORAGE_KEY = 'duck_talk:ui';
+const OLD_STORAGE_KEY = 'claude-talks:ui';
 
 interface Persisted {
   readbackEnabled: boolean;
@@ -28,7 +29,15 @@ const DEFAULTS: Persisted = {
 
 function load(): Persisted {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    // Migrate from old key
+    if (!raw) {
+      raw = localStorage.getItem(OLD_STORAGE_KEY);
+      if (raw) {
+        localStorage.setItem(STORAGE_KEY, raw);
+        localStorage.removeItem(OLD_STORAGE_KEY);
+      }
+    }
     if (raw) {
       const parsed = JSON.parse(raw);
       // Migrate old learningMode boolean → mode enum
