@@ -1,6 +1,6 @@
 <script lang="ts">
   import { marked } from 'marked';
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { push, replace } from 'svelte-spa-router';
   import { createDataStore } from './stores/data.svelte';
   import { createUIStore } from './stores/ui.svelte';
@@ -18,6 +18,7 @@
     buildToolResultMap,
     isToolResultOnly,
   } from '../../lib/message-helpers';
+  import reduckLogo from '../../assets/Reduck_Brand_Mark_RGB_Inverse.svg';
   import './styles/colorPalette.css';
   import './styles/fontSizes.css';
   import './styles/reduck-theme.css';
@@ -72,9 +73,8 @@
 
   let resultMap = $derived(buildToolResultMap(live.messages));
 
-  // --- Server config (Gemini API key) ---
-  let apiKey = $state<string | null>(null);
-  fetch('/api/config').then(r => r.json()).then(d => { apiKey = d.gemini_api_key ?? null; }).catch(() => {});
+  // --- Gemini API key (Vite env var) ---
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || null;
 
   // --- InputMode ---
   type InputMode = 'idle' | 'recording' | 'review' | 'streaming';
@@ -251,6 +251,23 @@
     audioLevels = new Array(NUM_BARS).fill(0);
   }
 
+  // --- Sidebar ---
+  interface SessionInfo { id: string; name: string; summary: string; updated_at: string; }
+  let sessions = $state<SessionInfo[]>([]);
+  let sidebarOpen = $state(false);
+  let mounted = $state(false);
+
+  fetch('/api/sessions').then(r => r.json()).then((s: SessionInfo[]) => { sessions = s; }).catch(() => {});
+
+  onMount(() => {
+    sidebarOpen = localStorage.getItem('sidebar-open') === 'true';
+    requestAnimationFrame(() => { mounted = true; });
+  });
+
+  $effect(() => {
+    if (mounted) localStorage.setItem('sidebar-open', sidebarOpen.toString());
+  });
+
   let messagesEl: HTMLDivElement;
 
   // Auto-scroll chat on new content
@@ -263,7 +280,7 @@
   // Sync URL with session ID
   $effect(() => {
     const id = live.claudeSessionId;
-    if (id && id !== params?.id) replace(`/live/${id}`);
+    if (id && id !== params?.id) replace(`/${id}`);
   });
 
   // Sync waveform with connection status
@@ -286,19 +303,62 @@
   }
 }} />
 
-<main class="reduck-theme">
-  <header>
-    <button class="header-link" onclick={() => push('/')}>Home</button>
-    <span class="spacer"></span>
+<div class="app-layout reduck-theme">
+  <!-- Sidebar -->
+  <header class="sidebar" class:mounted class:open={sidebarOpen}>
+    <div class="top-actions">
+      {#if sidebarOpen}
+        <a class="logo-link" aria-label="Homepage" href="#/" onclick={(e) => { e.preventDefault(); push('/'); }}>
+          <img src={reduckLogo} alt="Reduck" width="31" height="31" />
+        </a>
+        <button class="sidebar-toggle-btn" type="button" onclick={() => sidebarOpen = !sidebarOpen} aria-label="Collapse sidebar">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+          </svg>
+        </button>
+      {:else}
+        <button class="expand-sidebar-btn" type="button" aria-label="Expand sidebar" onclick={() => sidebarOpen = !sidebarOpen}>
+          <img src={reduckLogo} alt="Reduck" width="31" height="31" />
+        </button>
+      {/if}
+    </div>
+    <nav aria-label="Main">
+      <ul>
+        <li>
+          <a class="nav-link primary" href="#/" onclick={(e) => { e.preventDefault(); push('/'); }}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+            </svg>
+            {#if sidebarOpen}<span class="ellipsis">New session</span>{/if}
+          </a>
+        </li>
+      </ul>
+    </nav>
+    {#if sidebarOpen}
+      <nav class="recent-sessions-nav" aria-label="Recent sessions">
+        <span class="nav-label">Recent sessions</span>
+        <ul>
+          {#each sessions as s (s.id)}
+            <li>
+              <a class="nav-link" class:active={params?.id === s.id} href="#/{s.id}" onclick={(e) => { e.preventDefault(); push(`/${s.id}`); }}>
+                <span class="ellipsis">{s.name}</span>
+              </a>
+            </li>
+          {/each}
+        </ul>
+      </nav>
+    {/if}
   </header>
 
-  {#if historyLoading}
-    <p class="loading">Loading conversation...</p>
-  {/if}
+  <!-- Main content -->
+  <main>
+    {#if historyLoading}
+      <p class="loading">Loading conversation...</p>
+    {/if}
 
-  <div class="chat-scroll" bind:this={messagesEl}>
-    <div class="column">
-      <div class="chat">
+    <div class="chat-scroll" bind:this={messagesEl}>
+      <div class="column">
+        <div class="chat">
         {#each live.messages as msg, i}
           {#if !isToolResultOnly(msg)}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -500,50 +560,178 @@
     </div>
   </div>
 
-  <!-- Toast -->
-  {#if live.toast}
-    <div class="toast">{live.toast}</div>
-  {/if}
-</main>
+    <!-- Toast -->
+    {#if live.toast}
+      <div class="toast">{live.toast}</div>
+    {/if}
+  </main>
+</div>
 
 <style>
-  /* === LAYOUT === */
-  main {
+  /* === APP LAYOUT === */
+  .app-layout {
+    display: flex;
     width: 100%;
     height: 100dvh;
+    overflow: hidden;
+  }
+
+  main {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    font-family: 'Inter', sans-serif;
+    background: var(--background-color);
   }
-
-  header {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    padding: 0.5rem 1rem;
-    max-width: 640px;
-    width: 100%;
-    margin: 0 auto;
-    box-sizing: border-box;
-  }
-
-  .header-link {
-    font-size: var(--font-size-small);
-    color: var(--color-grey-400);
-    border: none;
-    background: none;
-    cursor: pointer;
-    padding: 0.25rem 0;
-    font-family: inherit;
-    transition: color 200ms;
-  }
-
-  .header-link:hover { color: var(--color-grey-200); }
-  .spacer { flex: 1; }
 
   .loading {
     color: var(--color-grey-400);
     text-align: center;
+  }
+
+  /* === SIDEBAR === */
+  .sidebar {
+    background: var(--color-grey-900);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 52px;
+    padding-bottom: 8px;
+    width: 100%;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .sidebar.mounted {
+    transition: max-width 400ms;
+  }
+
+  .sidebar.open {
+    max-width: 226px;
+  }
+
+  .top-actions {
+    align-items: center;
+    display: flex;
+    height: 55px;
+    justify-content: space-between;
+    padding: 0 10px;
+  }
+
+  .logo-link,
+  .expand-sidebar-btn {
+    align-items: center;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    margin: 0;
+    padding: 0;
+    text-decoration: none;
+  }
+
+  .sidebar-toggle-btn {
+    align-items: center;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--color-grey-400);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    padding: 4px;
+    transition: background 200ms, color 200ms;
+  }
+
+  .sidebar-toggle-btn:hover {
+    background: var(--color-grey-800);
+    color: var(--color-grey-200);
+  }
+
+  .nav-link {
+    align-items: center;
+    background: transparent;
+    border-radius: 4px;
+    color: var(--color-grey-300);
+    display: flex;
+    gap: 0.5em;
+    min-height: 31px;
+    padding: 0 8px;
+    text-align: left;
+    text-decoration: none;
+    transition: color 200ms, background 200ms;
+    width: 100%;
+  }
+
+  .nav-link.primary {
+    color: var(--color-grey-50);
+    font-weight: 500;
+  }
+
+  .nav-link:focus,
+  .nav-link:hover {
+    background: var(--color-grey-800);
+  }
+
+  .nav-link:active,
+  .nav-link.active {
+    background: var(--color-grey-700);
+  }
+
+  .sidebar:not(.open) .nav-link {
+    min-height: 31px;
+    min-width: 31px;
+    width: fit-content;
+  }
+
+  .nav-link > :global(*) {
+    flex-shrink: 0;
+  }
+
+  .sidebar nav {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sidebar ul {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    list-style: none;
+    margin: 0;
+    overflow: hidden auto;
+    padding: 10px;
+  }
+
+  .ellipsis {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .recent-sessions-nav {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .recent-sessions-nav ul {
+    overflow: auto;
+    padding: 10px;
+    padding-top: 6px;
+  }
+
+  .nav-label {
+    display: block;
+    color: var(--color-grey-400);
+    font-size: var(--font-size-caption);
+    padding: 0 10px 4px;
+    flex-shrink: 0;
   }
 
   /* === SCROLL + COLUMN === */
