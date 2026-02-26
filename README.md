@@ -21,7 +21,7 @@ txt = raw stream of tokens
 
 ## Demo
 
-
+<video src="public/demo.mp4" width="600" controls></video>
 
 ## Quick start
 
