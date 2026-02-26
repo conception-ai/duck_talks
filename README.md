@@ -11,7 +11,7 @@ The key technology behind DuckTalk is a generic voice wrapper that can take any 
 
 //
 
-ss
+
 
 ## Quick start
 
