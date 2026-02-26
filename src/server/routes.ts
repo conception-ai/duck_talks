@@ -60,6 +60,7 @@ export function createApp(cfg: ServerConfig): express.Express {
     res.json({
       config_dir: cfg.claude.configDir,
       project_cwd: PROJECT_CWD,
+      gemini_api_key: process.env['GEMINI_API_KEY'] || process.env['VITE_GEMINI_API_KEY'] || null,
     });
   });
 

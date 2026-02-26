@@ -25,7 +25,7 @@ You will need:
 
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) on PATH
 - [`ANTHROPIC_API_KEY`](https://console.anthropic.com/) — for Claude Code
-- [`VITE_GEMINI_API_KEY`](https://aistudio.google.com/apikey) — for Gemini voice (free tier works, no credit card needed)
+- [`GEMINI_API_KEY`](https://aistudio.google.com/apikey) — for Gemini voice (free tier works, no credit card needed)
 
 ### Option 1 — npx (fastest)
 
@@ -38,7 +38,7 @@ Set your API keys as environment variables or in a `.env` file in the current di
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
-VITE_GEMINI_API_KEY=AIza...
+GEMINI_API_KEY=AIza...
 ```
 
 ### Option 2 — from source

@@ -1,0 +1,14 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Plan: commit snapshot",
+            "type": "shell",
+            "command": "cd \"${fileDirname}\" && git add \"${file}\" && git commit -m 'snapshot'",
+            "presentation": {
+                "reveal": "silent",
+                "panel": "shared"
+            }
+        }
+    ]
+}

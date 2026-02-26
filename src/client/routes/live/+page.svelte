@@ -75,8 +75,11 @@
 
   let resultMap = $derived(buildToolResultMap(live.messages));
 
-  // --- Gemini API key (Vite env var) ---
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || null;
+  // --- Gemini API key (fetched from server, fallback to build-time env var) ---
+  let apiKey = $state<string | null>(import.meta.env.VITE_GEMINI_API_KEY || null);
+  fetch('/api/config').then(r => r.json()).then((cfg: { gemini_api_key?: string }) => {
+    if (cfg.gemini_api_key) apiKey = cfg.gemini_api_key;
+  }).catch(() => {});
 
   // --- InputMode ---
   type InputMode = 'idle' | 'recording' | 'review' | 'streaming';

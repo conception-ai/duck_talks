@@ -27,7 +27,7 @@ export default defineConfig({
   build: {
     outDir: 'dist/public',
   },
-  envPrefix: ['VITE_', 'GOOGLE_'],
+  envPrefix: 'VITE_',
   server: {
     proxy: {
       '/api': 'http://localhost:8000',
