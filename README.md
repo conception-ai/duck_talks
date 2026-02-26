@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src/client/assets/duck_talk_logo.svg" width="80" alt="Duck Talk logo" />
+</p>
+
 # Duck Talk
 
 Talk to Claude Code. Hear it talk back. Approve, interrupt, or redirect — all by voice, from anywhere.
