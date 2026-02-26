@@ -30,11 +30,11 @@ You will need:
 ### Option 1 — npx (fastest)
 
 ```bash
-npx duck_talk
+ANTHROPIC_API_KEY=sk-ant-... GEMINI_API_KEY=AIza... npx duck_talk
 # Opens http://localhost:8000
 ```
 
-Set your API keys as environment variables or in a `.env` file in the current directory:
+Or set them in a `.env` file in the current directory:
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-...
