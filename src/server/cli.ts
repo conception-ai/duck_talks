@@ -51,8 +51,15 @@ function parseArgs(argv: string[]): { port: number; host: string; noBrowser: boo
 // --- Prerequisites ---
 
 function checkPrereqs(config: ClaudeConfig): void {
-  if (!process.env['ANTHROPIC_API_KEY']) {
-    console.warn('Warning: ANTHROPIC_API_KEY not set. Claude may use other auth methods.');
+  const missing: string[] = [];
+
+  if (!process.env['ANTHROPIC_API_KEY']) missing.push('ANTHROPIC_API_KEY');
+  if (!process.env['GEMINI_API_KEY'] && !process.env['VITE_GEMINI_API_KEY']) missing.push('GEMINI_API_KEY');
+
+  if (missing.length) {
+    console.error(`Missing required env vars: ${missing.join(', ')}`);
+    console.error('Set them in .env or export before running.');
+    process.exit(1);
   }
 
   const cliPath = config.cliPath || 'claude';
@@ -90,23 +97,41 @@ const serverConfig: ServerConfig = {
 
 const app = createApp(serverConfig);
 
-app.listen(port, host, () => {
-  console.info(`Duck Talk listening on http://${host}:${port}`);
-  console.info(`Project: ${serverConfig.cwd}`);
-  if (serverConfig.publicDir) {
-    console.info('Serving frontend from dist/public/');
-  } else {
-    console.info('No built frontend found — run "npm run build" first, or use Vite dev server');
-  }
+const MAX_PORT_ATTEMPTS = 10;
 
-  if (!noBrowser) {
-    setTimeout(() => {
-      const url = `http://localhost:${port}`;
-      try {
-        execSync(`open ${url}`, { stdio: 'ignore' });
-      } catch {
-        // open not available on all platforms
-      }
-    }, 1500);
-  }
-});
+function startServer(attemptPort: number, attempt: number): void {
+  const server = app.listen(attemptPort, host, () => {
+    if (attemptPort !== port) {
+      console.info(`Port ${port} in use, using ${attemptPort} instead`);
+    }
+    console.info(`Duck Talk listening on http://${host}:${attemptPort}`);
+    console.info(`Project: ${serverConfig.cwd}`);
+    if (serverConfig.publicDir) {
+      console.info('Serving frontend from dist/public/');
+    } else {
+      console.info('No built frontend found — run "npm run build" first, or use Vite dev server');
+    }
+
+    if (!noBrowser) {
+      setTimeout(() => {
+        const url = `http://localhost:${attemptPort}`;
+        try {
+          execSync(`open ${url}`, { stdio: 'ignore' });
+        } catch {
+          // open not available on all platforms
+        }
+      }, 1500);
+    }
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE' && attempt < MAX_PORT_ATTEMPTS) {
+      startServer(attemptPort + 1, attempt + 1);
+    } else {
+      console.error(`Server error: ${err.message}`);
+      process.exit(1);
+    }
+  });
+}
+
+startServer(port, 1);
